@@ -1,0 +1,12 @@
+data/
+*.nc
+*.tif
+*.npy
+*.npz
+downscaler.pt
+Images/
+
+.idea/
+__pycache__/
+*.pyc
+.venv/

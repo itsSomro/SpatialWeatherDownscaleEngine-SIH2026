@@ -7,15 +7,19 @@ has produced data/chikmagaluru/training_dataset.npz and norm_stats.json.
 
 Architecture: symmetrical 4-block Encoder/Decoder U-Net with skip
 connections, matching SIH_PS & DOCUMENT.md Section 6.1 (minus the
-bottleneck-concat detail — DEM is stacked as an input channel instead,
-consistent with build_dataset.py's (N, 2, 128, 128) tensors).
+bottleneck-concat detail — DEM/pressure are stacked as input channels
+instead, consistent with build_dataset.py's (N, 3, 128, 128) tensors).
 
-Input:  (B, 2, 128, 128)  -> channels = [coarse_temp_upsampled, dem]
+Input:  (B, 3, 128, 128)  -> channels = [coarse_temp, coarse_pressure, dem]
 Output: (B, 1, 128, 128)  -> predicted high-res temp (normalized)
 
 Loss (Section 6.2): L_Total = L_MSE + alpha * L_L1 + beta * L_Gradient
   L_Gradient penalizes mismatched spatial gradients (Sobel-style) so
   the output stays sharp instead of regressing to a blurry mean.
+
+NOTE: in_channels changed from 2 -> 3 (added surface pressure). Any
+checkpoint trained before this change is INCOMPATIBLE and must be
+retrained from scratch with the rebuilt (3-channel) training_dataset.npz.
 
 Paths auto-resolve from this project's folder layout:
     SpatialWeatherDownscaleEngine/
@@ -36,7 +40,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
-from build_dataset import WeatherDownscaleDataset  # was build_training_dataset
+from build_dataset import WeatherDownscaleDataset
 
 # ---------------------------------------------------------------------------
 # PATHS — resolve relative to project root regardless of cwd
@@ -78,9 +82,10 @@ def conv_block(in_ch, out_ch):
 
 class DownscaleUNet(nn.Module):
     """4 encoder blocks -> bottleneck -> 4 decoder blocks, skip connections.
-    in_channels=2 ([coarse_temp, dem]), out_channels=1 (high-res temp)."""
+    in_channels=3 ([coarse_temp, coarse_pressure, dem]), out_channels=1
+    (high-res temp)."""
 
-    def __init__(self, in_channels=2, out_channels=1, base=32):
+    def __init__(self, in_channels=3, out_channels=1, base=32):
         super().__init__()
         # Encoder
         self.enc1 = conv_block(in_channels, base)          # 128 -> 128
@@ -187,7 +192,11 @@ def train():
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
     print(f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
 
-    model = DownscaleUNet(in_channels=2, out_channels=1, base=32).to(DEVICE)
+    in_channels = train_ds.inputs.shape[1]
+    print(f"Detected {in_channels} input channels "
+          f"(expect 3: [coarse_temp, coarse_pressure, dem])")
+
+    model = DownscaleUNet(in_channels=in_channels, out_channels=1, base=32).to(DEVICE)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {n_params:,}")
 
@@ -217,7 +226,7 @@ def train():
                 "val_loss": val_loss,
                 "norm_stats": stats,
                 "config": {
-                    "in_channels": 2, "out_channels": 1, "base": 32,
+                    "in_channels": in_channels, "out_channels": 1, "base": 32,
                     "alpha_l1": ALPHA_L1, "beta_gradient": BETA_GRADIENT,
                 },
             }, CHECKPOINT_OUT)

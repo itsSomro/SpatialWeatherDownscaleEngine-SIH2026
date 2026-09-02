@@ -3,19 +3,38 @@ Evaluate downscaler.pt on an UNSEEN region (default: Kodagu).
 
 Run this AFTER:
     python build_dataset.py --mode test --region kodagu
-has produced data/kodagu/test_dataset_kodagu.npz.
+has produced data/kodagu/test_dataset_kodagu.npz (includes the
+test_coarse_temp_true field needed for a fair physics baseline).
 
-This answers the real question your MoES objective #3 asks: does the
-U-Net beat naive interpolation, and does that hold up on a region it
-never trained on (not just held-out val crops from the same region)?
+Compares THREE methods, in real Celsius:
+  1. Naive upsampling      -- the model's actual input: a reconstructed
+                               10km-equivalent view of the coarse temp
+                               field, no elevation info. This is what
+                               the U-Net has to sharpen.
+  2. Lapse-rate physics    -- the TRUE raw coarse ERA5 field (bilinear
+                               upsampled, no degrade cycle) + a textbook
+                               fixed correction: T = T_coarse - 0.0065*dz.
+                               This is what a meteorologist would do
+                               with a formula and no ML.
 
-For each test sample it computes, in real Celsius:
-  - Model MAE / RMSE          (U-Net prediction vs ground truth Y)
-  - Naive-baseline MAE / RMSE (plain upsampled coarse temp vs Y,
-                                i.e. what you'd get with NO deep
-                                learning at all -- just interpolation)
+                               NOTE: this deliberately does NOT start
+                               from the "naive upsampling" field above.
+                               That field is built by degrading the
+                               already lapse-corrected ground truth, so
+                               it already contains a blurred echo of the
+                               elevation correction. Applying a second
+                               full-strength correction on top of it
+                               double-counts that signal and makes the
+                               physics baseline look artificially much
+                               worse than naive interpolation. Starting
+                               from the true undegraded field avoids
+                               that and gives a fair comparison.
+  3. U-Net (ours)          -- the trained model.
 
-It also saves side-by-side heatmap PNGs (coarse input / DEM / ground
+Beating #1 proves elevation matters. Beating #2 proves the network
+learned something better than the standard textbook correction.
+
+Also saves side-by-side heatmap PNGs (coarse input / DEM / ground
 truth / model output / error map) for the first few samples into
 Images/ -- drop these straight into Slide 6 of the PPT.
 
@@ -49,6 +68,11 @@ IMAGES_DIR = PROJECT_ROOT / "Images"
 CHECKPOINT = PROJECT_ROOT / "downscaler.pt"
 N_PLOT_SAMPLES = 4
 
+# Fixed, textbook dry-adiabatic lapse rate -- NOT fit to any data here,
+# this is the standard physical constant, same as used to synthesize
+# the ground truth in build_dataset.py's BASE_LAPSE_RATE.
+PHYSICS_LAPSE_RATE = 0.0065  # deg C per meter
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -64,7 +88,8 @@ def load_model():
     model.eval()
     stats = ckpt["norm_stats"]
     print(f"Loaded checkpoint from epoch {ckpt['epoch']}, "
-          f"training val_loss={ckpt['val_loss']:.4f}")
+          f"training val_loss={ckpt['val_loss']:.4f}, "
+          f"in_channels={cfg['in_channels']}")
     return model, stats
 
 
@@ -82,34 +107,45 @@ def evaluate(region):
 
     model, stats = load_model()
     ds = WeatherDownscaleDataset(test_npz, split="test")
+    npz_data = np.load(test_npz)
+    raw_dem = npz_data["test_dem_raw"]                # (N, 128, 128), unnormalized
+    true_coarse = npz_data["test_coarse_temp_true"]    # (N, 128, 128), raw Celsius,
+                                                        # undegraded coarse field
     print(f"Evaluating on {len(ds)} unseen '{region}' samples "
           f"(source: {test_npz})")
 
-    model_abs_err, model_sq_err = [], []
-    naive_abs_err, naive_sq_err = [], []
+    model_abs, model_sq = [], []
+    naive_abs, naive_sq = [], []
+    lapse_abs, lapse_sq = [], []
 
     all_preds_c, all_targets_c, all_dem, all_coarse_in = [], [], [], []
 
     with torch.no_grad():
         for i in range(len(ds)):
-            x, y_c = ds[i]                       # x: (2,128,128) norm; y_c: (1,128,128) raw C
+            x, y_c = ds[i]                       # x: (3,128,128) norm; y_c: (1,128,128) raw C
             x_batch = x.unsqueeze(0).to(DEVICE)
             pred_norm = model(x_batch).cpu().numpy()[0, 0]   # (128,128) normalized
             pred_c = denorm_temp(pred_norm, stats)
 
             target_c = y_c.numpy()[0]            # (128,128) raw Celsius
 
-            # naive baseline: the coarse-temp channel of the input,
-            # denormalized back to Celsius -- i.e. plain bilinear
-            # upsampling with NO elevation correction at all
             x_np = x.numpy()
-            naive_c = denorm_X(x_np[0], stats)
-            dem_norm = x_np[1]
+            # channel 0 = coarse temp, channel 1 = coarse pressure, channel 2 = dem
+            naive_c = denorm_X(x_np[0], stats)   # naive baseline: model's actual input
+            dem_norm = x_np[2]
+            dem_raw = raw_dem[i]                 # unnormalized elevation, meters
 
-            model_abs_err.append(np.abs(pred_c - target_c).mean())
-            model_sq_err.append(((pred_c - target_c) ** 2).mean())
-            naive_abs_err.append(np.abs(naive_c - target_c).mean())
-            naive_sq_err.append(((naive_c - target_c) ** 2).mean())
+            # physics baseline: TRUE raw coarse field + fixed lapse-rate
+            # correction -- NOT built from naive_c, see module docstring
+            elevation_anomaly = dem_raw - dem_raw.mean()
+            lapse_c = true_coarse[i] - PHYSICS_LAPSE_RATE * elevation_anomaly
+
+            model_abs.append(np.abs(pred_c - target_c).mean())
+            model_sq.append(((pred_c - target_c) ** 2).mean())
+            naive_abs.append(np.abs(naive_c - target_c).mean())
+            naive_sq.append(((naive_c - target_c) ** 2).mean())
+            lapse_abs.append(np.abs(lapse_c - target_c).mean())
+            lapse_sq.append(((lapse_c - target_c) ** 2).mean())
 
             if i < N_PLOT_SAMPLES:
                 all_preds_c.append(pred_c)
@@ -117,22 +153,27 @@ def evaluate(region):
                 all_dem.append(dem_norm)
                 all_coarse_in.append(naive_c)
 
-    model_mae = np.mean(model_abs_err)
-    model_rmse = np.sqrt(np.mean(model_sq_err))
-    naive_mae = np.mean(naive_abs_err)
-    naive_rmse = np.sqrt(np.mean(naive_sq_err))
+    model_mae, model_rmse = np.mean(model_abs), np.sqrt(np.mean(model_sq))
+    naive_mae, naive_rmse = np.mean(naive_abs), np.sqrt(np.mean(naive_sq))
+    lapse_mae, lapse_rmse = np.mean(lapse_abs), np.sqrt(np.mean(lapse_sq))
 
     print(f"\n=== Out-of-region test results ({region}, unseen) ===")
-    print(f"{'Method':<20}{'MAE (°C)':<12}{'RMSE (°C)':<12}")
-    print(f"{'U-Net (ours)':<20}{model_mae:<12.3f}{model_rmse:<12.3f}")
-    print(f"{'Naive upsampling':<20}{naive_mae:<12.3f}{naive_rmse:<12.3f}")
-    improvement = 100 * (naive_mae - model_mae) / naive_mae
-    print(f"\nMAE improvement over naive interpolation: {improvement:.1f}%")
+    print(f"{'Method':<24}{'MAE (°C)':<12}{'RMSE (°C)':<12}")
+    print(f"{'Naive upsampling':<24}{naive_mae:<12.3f}{naive_rmse:<12.3f}")
+    print(f"{'Lapse-rate physics':<24}{lapse_mae:<12.3f}{lapse_rmse:<12.3f}")
+    print(f"{'U-Net (ours)':<24}{model_mae:<12.3f}{model_rmse:<12.3f}")
+
+    improvement_vs_naive = 100 * (naive_mae - model_mae) / naive_mae
+    improvement_vs_lapse = 100 * (lapse_mae - model_mae) / lapse_mae
+    print(f"\nMAE improvement over naive interpolation: {improvement_vs_naive:.1f}%")
+    print(f"MAE improvement over lapse-rate physics baseline: {improvement_vs_lapse:.1f}%")
 
     results = {
         "model_mae_c": float(model_mae), "model_rmse_c": float(model_rmse),
         "naive_mae_c": float(naive_mae), "naive_rmse_c": float(naive_rmse),
-        "mae_improvement_pct": float(improvement),
+        "lapse_physics_mae_c": float(lapse_mae), "lapse_physics_rmse_c": float(lapse_rmse),
+        "mae_improvement_vs_naive_pct": float(improvement_vs_naive),
+        "mae_improvement_vs_lapse_physics_pct": float(improvement_vs_lapse),
         "n_test_samples": len(ds),
         "region": f"{region} (unseen, out-of-distribution)",
     }

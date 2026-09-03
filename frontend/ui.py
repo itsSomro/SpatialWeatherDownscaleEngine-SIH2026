@@ -10,21 +10,17 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-# Add scripts directory to path
+
+
 ROOT_DIR = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = ROOT_DIR / "scripts"
+sys.path.insert(0, str(ROOT_DIR))
 sys.path.insert(0, str(SCRIPTS_DIR))
-
-# Load environment variables (HF_TOKEN, GEMINI_API_KEY, etc.) from a .env file
-from dotenv import load_dotenv
-load_dotenv(ROOT_DIR / ".env")
-
 from ai_advisor import ask_ai_chat
-from ai_agent.agent import generate_data_summary, ask_data_agent, is_configured as hf_is_configured
 
-# ---------------------------------------------------------
+ 
 # PAGE SETUP 
-# ---------------------------------------------------------
+
 st.set_page_config(
     layout="wide",
     page_title="Universal Spatial Weather Downscaler | SIH 2026",
@@ -78,9 +74,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------------------------------------------------
+ 
 # BACKEND API CONFIG
-# ---------------------------------------------------------
+ 
 API_URL = "http://localhost:8000"
 
 
@@ -125,9 +121,9 @@ def fetch_metadata():
 
 metadata = fetch_metadata()
 
-# ---------------------------------------------------------
+ 
 # SIDEBAR NAVIGATION & SEARCH
-# ---------------------------------------------------------
+ 
 with st.sidebar:
     st.image("https://img.icons8.com/clouds/200/sun.png", width=90)
     st.title("Universal Downscaler")
@@ -181,9 +177,9 @@ with st.sidebar:
 
 
 
-# ---------------------------------------------------------
+ 
 # FETCH DOWNSCALING DATA
-# ---------------------------------------------------------
+ 
 @st.cache_data(ttl=120)
 def get_downscaled_data(region_key, mode, date):
     resp = requests.post(
@@ -223,9 +219,9 @@ with st.spinner("Executing Universal 14-Channel Physics-Guided Downscaling..."):
         st.stop()
 
 
-# ---------------------------------------------------------
+ 
 # HEADER & OVERVIEW METRICS
-# ---------------------------------------------------------
+ 
 col_title, col_badge = st.columns([4, 1])
 with col_title:
     st.title(f"⛅ {data.get('region_name', 'Regional Microclimate')}")
@@ -257,21 +253,20 @@ with m6:
 st.markdown("---")
 
 
-# ---------------------------------------------------------
+ 
 # MAIN MULTI-TAB INTERACTION
-# ---------------------------------------------------------
-tab_maps, tab_panchayats, tab_ground_stations, tab_ai, tab_data_agent = st.tabs([
+ 
+tab_maps, tab_panchayats, tab_ground_stations, tab_ai = st.tabs([
     "🛰️ High-Resolution Microclimate Maps",
     "🏛️ Gram Panchayat Intelligence",
     "🧪 Phase 2: Real Ground Station Sensor Validation",
-    "🤖 AI Agro-Climatic Advisory",
-    "🧠 AI Data Analyst"
+    "🤖 AI Agro-Climatic Advisory"
 ])
 
 
-# ---------------------------------------------------------
+ 
 # TAB 1: HIGH-RES 1KM MAPS & INTERACTIVE SPATIAL HOVER INSPECTOR
-# ---------------------------------------------------------
+ 
 with tab_maps:
     st.subheader("Multi-Variable Spatial Downscaling (Coarse 10km vs High-Res 1km)")
     st.caption("Select any essential climate variable to inspect its downscaled 1km micro-distribution.")
@@ -372,9 +367,9 @@ with tab_maps:
     st.plotly_chart(fig_heat, use_container_width=True)
 
 
-# ---------------------------------------------------------
+ 
 # TAB 2: GRAM PANCHAYAT AGRO-METEOROLOGICAL INTELLIGENCE
-# ---------------------------------------------------------
+ 
 with tab_panchayats:
     st.subheader("🏛️ Gram Panchayat Localized Agro-Meteorological Intelligence")
     st.markdown("Official IMD GKMS-format localized advisories (Frost, Fungal Blight, Chemical Spray Windows, and Irrigation Scheduling) for individual Panchayats.")
@@ -418,9 +413,9 @@ with tab_panchayats:
                 st.caption(adv.get("livestock", {}).get("action", "Thermal comfort zone."))
 
 
-# ---------------------------------------------------------
+ 
 # TAB 3: PHASE 2 REAL GROUND STATION BENCHMARK
-# ---------------------------------------------------------
+ 
 with tab_ground_stations:
     st.subheader("Phase 2: Validation Against Real NOAA ISD / IMD Ground Sensors")
     st.markdown("""
@@ -560,9 +555,9 @@ with tab_ground_stations:
         st.warning(f"Could not load ground station benchmark: {e}. Run `validate_ground_stations.py` first.")
 
 
-# ---------------------------------------------------------
+ 
 # TAB 4: AI AGRO-CLIMATIC ADVISORY
-# ---------------------------------------------------------
+ 
 with tab_ai:
     st.subheader("AI Microclimate Advisor (Context-Aware LLM)")
     st.markdown("Provides real-time, actionable agricultural and disaster advisories based on the 14-channel microclimate predictions.")
@@ -605,90 +600,3 @@ with tab_ai:
                 """, unsafe_allow_html=True)
             except Exception as e:
                 st.info(f"AI Advisor generated standard rule-based advisory for {data.get('region_name')}:\n\n- **Inversion Risk:** High cold pooling observed in lower valley wards below {int(elev_range[0] + 50)}m.\n- **Wind Factor:** Ridge zones subject to higher evapotranspiration under {live_meta.get('mean_wind_speed_kmh', 10.0):.1f} km/h winds.\n- **Recommended Action:** Delay night irrigation in valley hollows to prevent frost root shock.")
-
-
-# ---------------------------------------------------------
-# TAB 5: AI DATA ANALYST (Hugging Face powered)
-# ---------------------------------------------------------
-with tab_data_agent:
-    st.subheader("🧠 AI Data Analyst")
-    st.markdown(
-        "This agent reads the exact datapoints currently shown on this dashboard — 1km "
-        "temperatures, humidity, wind, ET₀, elevation spread, and per-panchayat bulletins — "
-        "and can **summarize** them or **answer questions**, grounded only in that data. "
-        "It's separate from the Agro-Climatic Advisory tab, which is tuned for prescriptive "
-        "farming and disaster guidance."
-    )
-
-    if not hf_is_configured():
-        st.warning(
-            "⚠️ No Hugging Face token detected. Add `HF_TOKEN=hf_xxxxxxxxxxxx` to a `.env` file "
-            "in the project root (get a free token at "
-            "[huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)), then "
-            "restart the app."
-        )
-
-    # Build a compact snapshot of the current datapoints for the agent
-    elev_r_da = metrics.get("elevation_range_m", [500, 1500])
-    telemetry_ctx = {
-        "region_name": data.get("region_name", "Current Region"),
-        "mode": mode_val if "mode_val" in locals() else "live",
-        "timestamp_label": datetime.datetime.now().strftime("%Y-%m-%d %H:%M UTC"),
-        "metrics": {
-            "min_temp": metrics.get("min_temp"),
-            "max_temp": metrics.get("max_temp"),
-            "mean_temp": metrics.get("mean_temp"),
-            "thermal_delta_c": metrics.get("thermal_delta_c"),
-            "elevation_range_m": elev_r_da,
-            "mean_humidity": metrics.get("mean_humidity", live_meta.get("mean_relative_humidity")),
-            "mean_wind_speed": metrics.get("mean_wind_speed", live_meta.get("mean_wind_speed_kmh")),
-            "mean_precip_mm": metrics.get("mean_precip_mm"),
-            "mean_et0_mm": metrics.get("mean_et0_mm"),
-        },
-        "live_meta": live_meta,
-        "panchayats": data.get("panchayats", []),
-    }
-
-    if "data_agent_chat" not in st.session_state:
-        st.session_state.data_agent_chat = []
-
-    col_sum, col_reset = st.columns([3, 1])
-    with col_sum:
-        gen_summary_clicked = st.button("📊 Generate Data Summary", type="primary")
-    with col_reset:
-        reset_clicked = st.button("🔄 Reset Chat")
-
-    if reset_clicked:
-        st.session_state.data_agent_chat = []
-        st.rerun()
-
-    if gen_summary_clicked:
-        with st.spinner("Reading current datapoints and summarizing..."):
-            summary_text = generate_data_summary(telemetry_ctx)
-        st.markdown(f"""
-        <div class="search-card">
-            <h4 style="color: #3b82f6; margin-top: 0;">📋 Current Data Summary — {telemetry_ctx['region_name']}</h4>
-            {summary_text}
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.markdown("#### 💬 Ask About the Data")
-    st.caption("e.g. \"Which panchayat has the highest irrigation demand?\" or \"How much colder is the valley than the ridge right now?\"")
-
-    for turn in st.session_state.data_agent_chat:
-        with st.chat_message(turn["role"]):
-            st.markdown(turn["content"])
-
-    user_question = st.chat_input("Ask a question about the current datapoints...")
-    if user_question:
-        st.session_state.data_agent_chat.append({"role": "user", "content": user_question})
-        with st.chat_message("user"):
-            st.markdown(user_question)
-        with st.chat_message("assistant"):
-            with st.spinner("Analyzing datapoints..."):
-                answer = ask_data_agent(
-                    user_question, telemetry_ctx, st.session_state.data_agent_chat[:-1]
-                )
-            st.markdown(answer)
-        st.session_state.data_agent_chat.append({"role": "assistant", "content": answer})

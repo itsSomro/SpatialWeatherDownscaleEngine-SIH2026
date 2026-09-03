@@ -10,7 +10,8 @@ connections, matching SIH_PS & DOCUMENT.md Section 6.1 (minus the
 bottleneck-concat detail — DEM/pressure are stacked as input channels
 instead, consistent with build_dataset.py's (N, 3, 128, 128) tensors).
 
-Input:  (B, 3, 128, 128)  -> channels = [coarse_temp, coarse_pressure, dem]
+# Input:  (B, 9, 128, 128)  -> channels = [coarse_temp, coarse_pressure, elevation, lat, lon, slope_mag, aspect_x, aspect_y, curvature]
+# NOTE: in_channels changed from 3 -> 9 (added terrain derivatives).
 Output: (B, 1, 128, 128)  -> predicted high-res temp (normalized)
 
 Loss (Section 6.2): L_Total = L_MSE + alpha * L_L1 + beta * L_Gradient
@@ -82,10 +83,10 @@ def conv_block(in_ch, out_ch):
 
 class DownscaleUNet(nn.Module):
     """4 encoder blocks -> bottleneck -> 4 decoder blocks, skip connections.
-    in_channels=3 ([coarse_temp, coarse_pressure, dem]), out_channels=1
-    (high-res temp)."""
+    in_channels=9 ([coarse_temp, coarse_pressure, dem]), out_channels=1
+    (high-res temp residual)."""
 
-    def __init__(self, in_channels=3, out_channels=1, base=32):
+    def __init__(self, in_channels=9, out_channels=1, base=32):
         super().__init__()
         # Encoder
         self.enc1 = conv_block(in_channels, base)          # 128 -> 128
@@ -194,7 +195,7 @@ def train():
 
     in_channels = train_ds.inputs.shape[1]
     print(f"Detected {in_channels} input channels "
-          f"(expect 3: [coarse_temp, coarse_pressure, dem])")
+          f"(expect 9: [coarse_temp, coarse_pressure, dem, lat, lon, slope, aspect_x, aspect_y, curv])")
 
     model = DownscaleUNet(in_channels=in_channels, out_channels=1, base=32).to(DEVICE)
     n_params = sum(p.numel() for p in model.parameters())

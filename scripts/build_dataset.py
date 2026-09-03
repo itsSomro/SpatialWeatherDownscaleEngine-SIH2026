@@ -2,58 +2,70 @@
 Build Dataset — ONE script for both training data and test/unseen-region
 data. Controlled by --mode {train,test}.
 
-INPUT CHANNELS (3): [coarse_temp, coarse_pressure, elevation]
-  (unchanged from before — see previous version's docstring for detail
-  on how each channel is built.)
+INPUT CHANNELS (9), in this exact order (evaluate_on_new_region.py relies
+on this order for channel indexing):
+    0. coarse_temp     -- synthetic coarse ERA5 temp, degraded from the
+                           lapse-rate-corrected target then re-upsampled.
+    1. coarse_pressure -- REAL coarse ERA5 surface pressure, regridded,
+                           no synthetic correction.
+    2. elevation       -- DEM patch, meters.
+    3. lat             -- pixel-center latitude (degrees), same everywhere
+                           along a row; gives the model absolute position,
+                           not just local terrain shape (per your PRD
+                           Section 4's stated 4-channel design).
+    4. lon             -- pixel-center longitude (degrees).
+    5. slope_mag       -- |gradient(elevation)|, terrain steepness.
+    6. aspect_x        -- x-component of the downhill unit vector
+                           (east-west facing direction).
+    7. aspect_y        -- y-component of the downhill unit vector
+                           (north-south facing direction). Together with
+                           aspect_x this avoids the 0/360-degree wraparound
+                           problem of encoding aspect as a compass angle.
+    8. curvature       -- Laplacian of elevation; >0 = concave (valley),
+                           <0 = convex (ridge).
 
-GROUND TRUTH (Y) — now three physical terms instead of one:
+Channels 5-8 are handed to the model directly instead of making the CNN
+re-derive gradient/Laplacian operators purely through learned convolution
+weights -- this is standard feature engineering (PRISM/WorldClim-style
+downscaling pipelines do the same), not label leakage: they're
+deterministic functions of the elevation channel alone, computable at
+inference with no extra data.
 
-  Y = coarse_temp
-      - lapse_rate * elevation_anomaly              (existing: cooler at altitude)
-      + slope_aspect_effect                          (NEW: south-facing slopes
-                                                        get extra solar warming,
-                                                        north-facing get extra
-                                                        cooling, scaled by how
-                                                        steep the local terrain is)
-      + valley_cooling_effect                         (NEW: concave, bowl-shaped
-                                                        terrain -- valleys --
-                                                        gets EXTRA cooling, mimicking
-                                                        real cold-air drainage/
-                                                        pooling on calm nights.
-                                                        Convex terrain -- ridges --
-                                                        gets no corresponding bonus,
-                                                        matching the real asymmetry
-                                                        of the effect)
+TARGET — RESIDUAL learning on top of Subgrid Lapse-Rate Physics:
+
+    residual = Y - baseline
+    baseline = coarse_temp - PHYSICS_LAPSE_RATE * subgrid_dz
+    subgrid_dz = dem_patch - dem_coarse_10km
+
+  where PHYSICS_LAPSE_RATE=0.0065 (deg C/m) is the standard dry environmental
+  lapse rate. Subgrid elevation anomaly measures local terrain height relative
+  to the coarse 10km grid cell mean (standard NOAA PRISM / Daymet methodology).
+  
+  Why residual learning:
+  The linear lapse rate explains ~80% of mountain temperature variation and is
+  already known from atmospheric physics. By having the baseline subtract the
+  linear subgrid lapse rate, the neural network doesn't waste capacity memorizing
+  simple elevation drops. Instead, 100% of the U-Net's capacity is focused on
+  learning non-linear microclimates:
+    - Solar aspect heating (south/west-facing slopes absorb more sunlight)
+    - Nocturnal cold-air pooling / valley drainage (temperature inversions)
+    - Ridge exposure and terrain curvature
+
+GROUND TRUTH (Y) generation:
+
+  Y = base_temp
+      - lapse_rate * subgrid_dz             (jittered physical lapse rate)
+      + dynamic_slope_aspect_effect         (solar heating: peak at midday)
+      + dynamic_valley_cooling_effect       (cold air drainage: peak at 4 AM)
       + small sensor noise
 
-  Both new terms are DELIBERATELY NOT linear in elevation alone -- they
-  depend on local terrain SHAPE (slope direction, curvature), which a
-  simple per-pixel lapse-rate formula structurally cannot represent.
-  This is what gives the U-Net a genuine, non-trivial reason to
-  outperform the fixed-formula physics baseline in evaluate_on_new_region.py:
-  that baseline stays a plain linear lapse correction on purpose (it
-  represents real, common operational practice), so beating it now
-  requires the network to actually pick up on terrain shape from the
-  DEM channel via its spatial convolutions -- something the baseline
-  cannot do by construction.
+Modes / layout / usage: unchanged.
 
-  Caveat for your own awareness: "south-facing" here is relative to the
-  DEM array's row axis (row 0 = north edge), so under the flip-based
-  data augmentation below, "south" is only geographically accurate for
-  the unflipped orientation. The DEM and its matching temperature target
-  are still flipped together, so the physical relationship stays
-  internally consistent -- the model just never learns true compass
-  directions, only array-relative terrain shape. Fine for a PoC; worth
-  knowing if asked.
-
-Modes / layout / usage: unchanged from before.
-
-    # Rebuild the training set (Chikmagaluru) -- REQUIRED after this change,
-    # since the ground-truth formula changed
     python build_dataset.py --mode train --region chikmagaluru
-
-    # Rebuild the test set (Kodagu) -- also REQUIRED
     python build_dataset.py --mode test --region kodagu
+
+Both REQUIRED to rerun after this change (channel count 3->9, targets
+raw-temp -> residual).
 
 Install: pip install torch numpy xarray rasterio scipy
 """
@@ -71,20 +83,22 @@ from torch.utils.data import Dataset
 
 PATCH_SIZE = 128
 DOWNSAMPLE_FACTOR = 10
-BASE_LAPSE_RATE = 0.0065
+BASE_LAPSE_RATE = 0.0065       # jittered -- used only to build ground truth Y
 LAPSE_RATE_JITTER = 0.0015
 NOISE_STD_C = 0.3
 VAL_FRACTION = 0.15
 SEED = 42
 
-# --- NEW: terrain-shape microclimate effects, added to the ground truth ---
-# Both are deg C, sized to be smaller than the primary lapse-rate signal
-# (which spans several deg C across a region with real elevation relief)
-# but still large enough to matter -- comparable to real-world observed
-# slope/valley microclimate differences of roughly half a degree to a
-# couple of degrees C.
-SLOPE_ASPECT_COEFF = 0.6     # max warming/cooling on very steep local slopes
-VALLEY_COOLING_COEFF = 0.5   # max extra cooling in strongly concave valley floors
+# Fixed (NOT jittered) -- used for the residual-learning baseline that gets
+# added back to the model's output. Must match evaluate_on_new_region.py's
+# PHYSICS_LAPSE_RATE exactly, or reconstructed predictions will be wrong.
+PHYSICS_LAPSE_RATE = 0.0065
+
+SLOPE_ASPECT_COEFF = 0.6     # deg C, ground-truth slope-aspect term strength
+VALLEY_COOLING_COEFF = 0.5   # deg C, ground-truth valley-cooling term strength
+
+INPUT_CHANNELS = ["coarse_temp", "coarse_pressure", "elevation", "lat", "lon",
+                   "slope_mag", "aspect_x", "aspect_y", "curvature"]
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -128,6 +142,22 @@ def resample_dem_to_1km(dem_path):
     return dem_1km
 
 
+def compute_lonlat_grid(dem_path, out_shape):
+    """Pixel-center lon/lat for a (new_h, new_w) grid resampled from
+    dem_path, using the same out_shape resample_dem_to_1km produced."""
+    new_h, new_w = out_shape
+    with rasterio.open(dem_path) as src:
+        new_transform = src.transform * src.transform.scale(
+            src.width / new_w, src.height / new_h
+        )
+    row_idx, col_idx = np.indices((new_h, new_w))
+    lon_grid = (new_transform.c + (col_idx + 0.5) * new_transform.a
+                + (row_idx + 0.5) * new_transform.b)
+    lat_grid = (new_transform.f + (col_idx + 0.5) * new_transform.d
+                + (row_idx + 0.5) * new_transform.e)
+    return lon_grid.astype(np.float32), lat_grid.astype(np.float32)
+
+
 def make_crop_offsets(dem_shape, patch_size):
     h, w = dem_shape
     max_top = h - patch_size
@@ -139,70 +169,98 @@ def make_crop_offsets(dem_shape, patch_size):
     return [(t, l) for t in tops for l in lefts]
 
 
-def get_dem_patch(dem_1km, top, left, patch_size):
-    """Crop a patch_size x patch_size window out of dem_1km. If dem_1km
-    is smaller than patch_size in either dimension (small bbox regions
-    like Kodagu can resample to e.g. 77x77), resize the WHOLE dem up to
-    patch_size instead of slicing -- slicing would silently return a
-    smaller array and break the (128,128) shape contract downstream."""
-    h, w = dem_1km.shape
+def get_patch(array_1km, top, left, patch_size):
+    """Crop a patch_size x patch_size window. If array_1km is smaller than
+    patch_size in either dimension, resize the WHOLE array up instead --
+    used identically for the DEM, lon grid, and lat grid so all three stay
+    spatially aligned."""
+    h, w = array_1km.shape
     if h < patch_size or w < patch_size:
         zy = patch_size / h
         zx = patch_size / w
-        return zoom(dem_1km, (zy, zx), order=1)
-    return dem_1km[top:top + patch_size, left:left + patch_size]
+        return zoom(array_1km, (zy, zx), order=1)
+    return array_1km[top:top + patch_size, left:left + patch_size]
 
 
-# ---------------------------------------------------------------------------
-# NEW: terrain-shape microclimate effects
-# ---------------------------------------------------------------------------
+def compute_terrain_derivatives(dem_patch):
+    """Slope magnitude, downhill-direction unit vector (aspect_x, aspect_y),
+    and curvature (Laplacian) -- computed from the FINAL (already-flipped)
+    dem_patch so sign conventions stay correct under flip augmentation
+    with no extra bookkeeping."""
+    dzdy, dzdx = np.gradient(dem_patch)
+    slope_mag = np.sqrt(dzdx ** 2 + dzdy ** 2)
+    aspect_x = -dzdx / (slope_mag + 1e-6)
+    aspect_y = -dzdy / (slope_mag + 1e-6)
+    curvature = laplace(dem_patch)
+    return (slope_mag.astype(np.float32), aspect_x.astype(np.float32),
+            aspect_y.astype(np.float32), curvature.astype(np.float32))
+
+
 def compute_slope_aspect_effect(dem_patch, coeff):
     """South-facing slopes get direct sun and run warmer; north-facing
-    slopes run cooler, scaled by how steep the local terrain is.
-    dem_patch axis convention: row 0 = north edge, row increasing = south
-    (matches rasterio's default north-up raster orientation)."""
-    dzdy, dzdx = np.gradient(dem_patch)  # elevation change per pixel (~1km)
+    slopes run cooler, scaled by how steep the local terrain is. Used to
+    build ground-truth Y -- separate from compute_terrain_derivatives,
+    which exposes the raw features as model INPUTS."""
+    dzdy, dzdx = np.gradient(dem_patch)
     slope_mag = np.sqrt(dzdx ** 2 + dzdy ** 2)
-    # southness: +1 = slope faces south (elevation drops going south),
-    #            -1 = slope faces north
     southness = -dzdy / (slope_mag + 1e-6)
-    # scale by LOCAL relative steepness (relative to this patch), capped
-    # so a handful of extreme cliff pixels don't dominate the effect
     slope_norm = np.clip(slope_mag / (slope_mag.std() + 1e-6), 0, 3)
-    return coeff * southness * slope_norm  # deg C
+    return coeff * southness * slope_norm
 
 
 def compute_valley_cooling_effect(dem_patch, coeff):
-    """Concave, bowl-shaped terrain (valleys) pools cold air and runs
-    extra cool. Convex terrain (ridges) gets NO corresponding warming
-    bonus -- that asymmetry matches the real physical effect, where cold
-    air drains downhill and collects in low points, but there's no
-    equivalent mechanism that specifically warms ridgetops."""
-    curvature = laplace(dem_patch)  # >0 = concave/bowl, <0 = convex/ridge
+    """Concave, bowl-shaped terrain (valleys) pools cold air; convex
+    terrain (ridges) gets no corresponding warming bonus."""
+    curvature = laplace(dem_patch)
     curvature_norm = curvature / (curvature.std() + 1e-6)
-    valley_strength = np.clip(curvature_norm, 0, None)  # only the valley side
-    return -coeff * valley_strength  # deg C, always <= 0
+    valley_strength = np.clip(curvature_norm, 0, None)
+    return -coeff * valley_strength
+
+
+def compute_subgrid_elevation_anomaly(dem_patch, downsample_factor=DOWNSAMPLE_FACTOR):
+    """Subgrid elevation anomaly: Z_1km - Z_coarse_10km.
+    ERA5 temperature represents surface temperature at the coarse grid cell's
+    mean elevation. Standard meteorological downscaling (NOAA PRISM, Daymet)
+    corrects only for the elevation difference between the high-res 1km point
+    and the coarse 10km cell, NOT an arbitrary district-wide mean."""
+    dem_small = dem_patch[::downsample_factor, ::downsample_factor]
+    zy = dem_patch.shape[0] / dem_small.shape[0]
+    zx = dem_patch.shape[1] / dem_small.shape[1]
+    dem_coarse = zoom(dem_small, (zy, zx), order=1)
+    return (dem_patch - dem_coarse).astype(np.float32)
 
 
 def build_one_pair(era5_temp_slice, era5_pressure_slice, dem_1km,
-                    top, left, rng, flip_h, flip_v):
-    dem_patch = get_dem_patch(dem_1km, top, left, PATCH_SIZE)
+                    lon_1km, lat_1km, top, left, rng, flip_h, flip_v, t):
+    dem_patch = get_patch(dem_1km, top, left, PATCH_SIZE)
+    lon_patch = get_patch(lon_1km, top, left, PATCH_SIZE)
+    lat_patch = get_patch(lat_1km, top, left, PATCH_SIZE)
 
     zy = PATCH_SIZE / era5_temp_slice.shape[0]
     zx = PATCH_SIZE / era5_temp_slice.shape[1]
     base_temp = zoom(era5_temp_slice, (zy, zx), order=1)   # TRUE raw coarse field
-    # pressure: just regrid the real coarse field, no synthetic correction
     base_pressure = zoom(era5_pressure_slice, (zy, zx), order=1)
 
     lapse_rate = BASE_LAPSE_RATE + rng.uniform(-LAPSE_RATE_JITTER,
                                                  LAPSE_RATE_JITTER)
-    elevation_anomaly = dem_patch - dem_patch.mean()
+    subgrid_dz = compute_subgrid_elevation_anomaly(dem_patch)
 
-    slope_aspect_effect = compute_slope_aspect_effect(dem_patch, SLOPE_ASPECT_COEFF)
-    valley_cooling_effect = compute_valley_cooling_effect(dem_patch, VALLEY_COOLING_COEFF)
+    # Dynamic diurnal cycle:
+    hour = t % 24
+    # Solar heating on south-facing slopes peaks at mid-day, zero at night (assuming 6 AM-6 PM daylight)
+    solar_mult = max(0.0, np.sin(np.pi * (hour - 6) / 12))
+    dynamic_slope_coeff = SLOPE_ASPECT_COEFF * solar_mult
 
+    # Valley cold air pooling peaks in early morning (around 4 AM), dissipates during the day
+    pooling_mult = max(0.0, np.cos(np.pi * (hour - 4) / 12))
+    dynamic_valley_coeff = VALLEY_COOLING_COEFF * pooling_mult
+
+    slope_aspect_effect = compute_slope_aspect_effect(dem_patch, dynamic_slope_coeff)
+    valley_cooling_effect = compute_valley_cooling_effect(dem_patch, dynamic_valley_coeff)
+
+    # Realistic 1km ground truth: coarse base temperature + subgrid lapse rate + solar heating + valley pooling + sensor noise
     Y = (base_temp
-         - lapse_rate * elevation_anomaly
+         - lapse_rate * subgrid_dz
          + slope_aspect_effect
          + valley_cooling_effect)
     Y = Y + rng.normal(0, NOISE_STD_C, size=Y.shape)
@@ -212,133 +270,157 @@ def build_one_pair(era5_temp_slice, era5_pressure_slice, dem_1km,
         Y = np.fliplr(Y)
         base_pressure = np.fliplr(base_pressure)
         base_temp = np.fliplr(base_temp)
+        lon_patch = np.fliplr(lon_patch)
+        lat_patch = np.fliplr(lat_patch)
     if flip_v:
         dem_patch = np.flipud(dem_patch)
         Y = np.flipud(Y)
         base_pressure = np.flipud(base_pressure)
         base_temp = np.flipud(base_temp)
+        lon_patch = np.flipud(lon_patch)
+        lat_patch = np.flipud(lat_patch)
 
-    # degrade Y to build the synthetic coarse TEMP INPUT the model sees,
-    # then upsample back -- this is what "coarse_temp" (the model's
-    # channel 0) actually is: a reconstructed 10km-equivalent view of Y,
-    # NOT the same thing as base_temp above. Since Y now includes the
-    # slope/valley terms too, those get blurred away here exactly like
-    # the lapse-rate term does -- the model has to recover ALL of it
-    # from the DEM channel, not just the elevation-only part.
+    # terrain derivatives computed AFTER flip, from the final dem_patch --
+    # gradient signs come out correct automatically, no separate handling
+    slope_mag, aspect_x, aspect_y, curvature = compute_terrain_derivatives(dem_patch)
+    subgrid_dz = compute_subgrid_elevation_anomaly(dem_patch)
+
+    # degrade Y (post-flip) to build the synthetic coarse TEMP input
     blurred = gaussian_filter(Y, sigma=DOWNSAMPLE_FACTOR / 3)
     X_small = blurred[::DOWNSAMPLE_FACTOR, ::DOWNSAMPLE_FACTOR]
     zy2 = PATCH_SIZE / X_small.shape[0]
     zx2 = PATCH_SIZE / X_small.shape[1]
     X_temp_upsampled = zoom(X_small, (zy2, zx2), order=1)
 
-    # pressure input is already coarse/real -- just regridded, no degrade cycle
     X_pressure_upsampled = base_pressure
 
-    return (X_temp_upsampled.astype(np.float32),
-            X_pressure_upsampled.astype(np.float32),
-            dem_patch.astype(np.float32),
-            Y.astype(np.float32),
-            base_temp.astype(np.float32))   # TRUE raw coarse temp, for eval only
+    # residual target: what's left after subtracting the physical subgrid lapse rate baseline.
+    # What the U-Net learns is purely the microclimate deviations (solar heating, valley cold air drainage).
+    residual_baseline = X_temp_upsampled - PHYSICS_LAPSE_RATE * subgrid_dz
+    residual = Y - residual_baseline
+
+    return {
+        "X_temp": X_temp_upsampled.astype(np.float32),
+        "X_pressure": X_pressure_upsampled.astype(np.float32),
+        "dem": dem_patch.astype(np.float32),
+        "lat": lat_patch.astype(np.float32),
+        "lon": lon_patch.astype(np.float32),
+        "slope_mag": slope_mag,
+        "aspect_x": aspect_x,
+        "aspect_y": aspect_y,
+        "curvature": curvature,
+        "Y": Y.astype(np.float32),
+        "residual": residual.astype(np.float32),
+        "base_temp": base_temp.astype(np.float32),   # TRUE raw coarse temp, eval only
+    }
 
 
 def build_all_pairs(nc_path, dem_path, seed):
     rng = np.random.default_rng(seed)
     era5_temp, era5_pressure = load_era5_temp_and_pressure(nc_path)
     dem_1km = resample_dem_to_1km(dem_path)
+    lon_1km, lat_1km = compute_lonlat_grid(dem_path, dem_1km.shape)
     offsets = make_crop_offsets(dem_1km.shape, PATCH_SIZE)
     print(f"Using {len(offsets)} crop position(s) x {era5_temp.shape[0]} "
           f"timesteps x 4 flips")
 
-    Xt_list, Xp_list, dem_list, Y_list, true_coarse_list = [], [], [], [], []
+    keys = ["X_temp", "X_pressure", "dem", "lat", "lon", "slope_mag",
+            "aspect_x", "aspect_y", "curvature", "Y", "residual", "base_temp"]
+    collected = {k: [] for k in keys}
+
     for t in range(era5_temp.shape[0]):
         for (top, left) in offsets:
             for flip_h in (False, True):
                 for flip_v in (False, True):
-                    Xt, Xp, dem_patch, Y, true_coarse = build_one_pair(
+                    pair = build_one_pair(
                         era5_temp[t], era5_pressure[t], dem_1km,
-                        top, left, rng, flip_h, flip_v
+                        lon_1km, lat_1km, top, left, rng, flip_h, flip_v, t
                     )
-                    Xt_list.append(Xt)
-                    Xp_list.append(Xp)
-                    dem_list.append(dem_patch)
-                    Y_list.append(Y)
-                    true_coarse_list.append(true_coarse)
+                    for k in keys:
+                        collected[k].append(pair[k])
 
-    Xt_all = np.stack(Xt_list)
-    Xp_all = np.stack(Xp_list)
-    dem_all = np.stack(dem_list)
-    Y_all = np.stack(Y_list)
-    true_coarse_all = np.stack(true_coarse_list)
-    print(f"Built {Xt_all.shape[0]} samples total")
-    return Xt_all, Xp_all, dem_all, Y_all, true_coarse_all
+    stacked = {k: np.stack(v) for k, v in collected.items()}
+    print(f"Built {stacked['Y'].shape[0]} samples total")
+    return stacked
+
+
+def _stack_inputs(d):
+    """Stack the 9 raw (unnormalized) channel arrays in INPUT_CHANNELS order."""
+    return np.stack([d["X_temp"], d["X_pressure"], d["dem"], d["lat"], d["lon"],
+                      d["slope_mag"], d["aspect_x"], d["aspect_y"], d["curvature"]],
+                     axis=1)
 
 
 # ---------------------------------------------------------------------------
-# MODE: TRAIN — fresh stats, train/val split, normalized targets
+# MODE: TRAIN — fresh stats, train/val split, RESIDUAL normalized targets
 # ---------------------------------------------------------------------------
 def build_train(nc_path, dem_path, out_path, stats_out_path, val_fraction):
-    Xt_all, Xp_all, dem_all, Y_all, _ = build_all_pairs(nc_path, dem_path, SEED)
+    d = build_all_pairs(nc_path, dem_path, SEED)
+    raw_inputs = _stack_inputs(d)  # (N, 9, 128, 128), unnormalized
 
-    stats = {
-        "X_mean": float(Xt_all.mean()), "X_std": float(Xt_all.std()),
-        "P_mean": float(Xp_all.mean()), "P_std": float(Xp_all.std()),
-        "dem_mean": float(dem_all.mean()), "dem_std": float(dem_all.std()),
-        "Y_mean": float(Y_all.mean()), "Y_std": float(Y_all.std()),
-    }
-    Xt_norm = (Xt_all - stats["X_mean"]) / stats["X_std"]
-    Xp_norm = (Xp_all - stats["P_mean"]) / stats["P_std"]
-    dem_norm = (dem_all - stats["dem_mean"]) / stats["dem_std"]
-    Y_norm = (Y_all - stats["Y_mean"]) / stats["Y_std"]
+    stats = {}
+    norm_inputs = np.empty_like(raw_inputs)
+    for ch_idx, name in enumerate(INPUT_CHANNELS):
+        arr = raw_inputs[:, ch_idx]
+        mean, std = float(arr.mean()), float(arr.std())
+        stats[f"{name}_mean"] = mean
+        stats[f"{name}_std"] = std
+        norm_inputs[:, ch_idx] = (arr - mean) / (std if std > 1e-8 else 1.0)
 
-    inputs = np.stack([Xt_norm, Xp_norm, dem_norm], axis=1)  # (N, 3, 128, 128)
-    targets = Y_norm[:, None, :, :]
+    # keep Y stats for reference/debugging even though training targets
+    # are the residual now, not raw Y
+    stats["Y_mean"] = float(d["Y"].mean())
+    stats["Y_std"] = float(d["Y"].std())
+    stats["R_mean"] = float(d["residual"].mean())
+    stats["R_std"] = float(d["residual"].std())
+
+    residual_norm = (d["residual"] - stats["R_mean"]) / stats["R_std"]
+    targets = residual_norm[:, None, :, :]
 
     rng = np.random.default_rng(SEED)
-    n = inputs.shape[0]
+    n = norm_inputs.shape[0]
     idx = rng.permutation(n)
     n_val = max(1, int(n * val_fraction))
     val_idx, train_idx = idx[:n_val], idx[n_val:]
 
     np.savez(
         out_path,
-        train_inputs=inputs[train_idx], train_targets=targets[train_idx],
-        val_inputs=inputs[val_idx], val_targets=targets[val_idx],
+        train_inputs=norm_inputs[train_idx], train_targets=targets[train_idx],
+        val_inputs=norm_inputs[val_idx], val_targets=targets[val_idx],
     )
     with open(stats_out_path, "w") as f:
         json.dump(stats, f, indent=2)
 
     print(f"Train samples: {len(train_idx)} | Val samples: {len(val_idx)}")
-    print(f"Input channels: [coarse_temp, coarse_pressure, elevation] -> {inputs.shape}")
+    print(f"Input channels ({len(INPUT_CHANNELS)}): {INPUT_CHANNELS} -> {norm_inputs.shape}")
+    print(f"Target: residual (R_mean={stats['R_mean']:.3f}, R_std={stats['R_std']:.3f})")
     print(f"Saved -> {out_path}, {stats_out_path}")
 
 
 # ---------------------------------------------------------------------------
-# MODE: TEST — reuse training stats, no split, raw-Celsius targets
+# MODE: TEST — reuse training stats, no split, ABSOLUTE Celsius targets
+# (residual reconstruction happens in evaluate_on_new_region.py, not here)
 # ---------------------------------------------------------------------------
 def build_test(nc_path, dem_path, out_path, stats_in_path):
-    Xt_all, Xp_all, dem_all, Y_all, true_coarse_all = build_all_pairs(
-        nc_path, dem_path, seed=123
-    )
+    d = build_all_pairs(nc_path, dem_path, seed=123)
+    raw_inputs = _stack_inputs(d)
 
     with open(stats_in_path) as f:
         stats = json.load(f)
-    Xt_norm = (Xt_all - stats["X_mean"]) / stats["X_std"]
-    Xp_norm = (Xp_all - stats["P_mean"]) / stats["P_std"]
-    dem_norm = (dem_all - stats["dem_mean"]) / stats["dem_std"]
-    # Y intentionally left in raw Celsius -- eval script denormalizes
-    # the model's prediction back to Celsius and compares directly.
 
-    inputs = np.stack([Xt_norm, Xp_norm, dem_norm], axis=1)
+    norm_inputs = np.empty_like(raw_inputs)
+    for ch_idx, name in enumerate(INPUT_CHANNELS):
+        mean, std = stats[f"{name}_mean"], stats[f"{name}_std"]
+        norm_inputs[:, ch_idx] = (raw_inputs[:, ch_idx] - mean) / (std if std > 1e-8 else 1.0)
 
     np.savez(
         out_path,
-        test_inputs=inputs,
-        test_targets_celsius=Y_all,
-        test_dem_raw=dem_all,               # RAW elevation, meters
-        test_coarse_temp_true=true_coarse_all,  # RAW undegraded coarse temp,
-                                                  # for the physics baseline
+        test_inputs=norm_inputs,
+        test_targets_celsius=d["Y"],              # RAW absolute temp, unchanged
+        test_dem_raw=d["dem"],                     # RAW elevation, meters
+        test_coarse_temp_true=d["base_temp"],      # RAW undegraded coarse temp
     )
-    print(f"Test samples: {inputs.shape[0]}")
+    print(f"Test samples: {norm_inputs.shape[0]}")
     print(f"Saved -> {out_path}")
     print(f"(Reused stats from {stats_in_path} -- not refit on test data)")
 

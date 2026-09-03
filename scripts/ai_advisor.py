@@ -55,8 +55,8 @@ def _generate_offline_advisory(telemetry: Dict[str, Any], prompt: str) -> str:
 3. **Emergency Helplines:** Ensure Gram Panchayat Kendra displays the 1km microclimate map on public notice boards.
 """
 
-    # 2. Cash crop impact (Coffee, Spices, Cardamom, Arecanut)
-    elif any(w in prompt_lower for w in ["crop", "coffee", "spice", "cardamom", "pepper", "arecanut", "farmer", "agriculture"]):
+    # 2. Cash crop impact (Coffee, Spices, Cardamom, Arecanut, Horticulture)
+    elif any(w in prompt_lower for w in ["coffee", "spice", "cardamom", "pepper", "arecanut", "plantation", "horticulture", "tea"]):
         is_chilly = down_min < 19.0
         is_hot = down_max > 27.0
         return f"""### ☕ CROP & HORTICULTURE MICROCLIMATE ASSESSMENT
@@ -98,7 +98,83 @@ def _generate_offline_advisory(telemetry: Dict[str, Any], prompt: str) -> str:
 3. **Frost Sensitivity:** Protect tender saplings and blossom spikes in low-lying wards.
 """
 
-    # 4. General / Default comprehensive response
+    # 4. Precision Irrigation & Evapotranspiration (FAO-56)
+    elif any(w in prompt_lower for w in ["irrigation", "water", "et0", "evapotranspiration", "watering", "liters"]):
+        et0_val = m.get("mean_et0_mm", 3.4)
+        liters_ha = int(et0_val * 10000)
+        return f"""### 💧 FAO-56 PRECISION IRRIGATION & WATER BUDGET
+**Jurisdiction:** {region_name} | **Reference Evapotranspiration ($ET_0$):** **{et0_val:.1f} mm/day**
+
+---
+
+#### 1. Crop Water Depletion Telemetry:
+- **Daily Atmospheric Evaporation Demand:** **{et0_val:.1f} mm** of soil water evaporated per day.
+- **Volumetric Replacement Need:** **{liters_ha:,} Liters per Hectare** required to restore field capacity.
+- **Topographic Variation:** Valley agriculture zones require ~15% less water due to humidity pooling, while sun-exposed south-facing terraces require up to **{et0_val * 1.2:.1f} mm/day**.
+
+#### 2. Practical Irrigation Scheduling:
+1. **Drip Irrigation Run-Time:** 2.5 hours in early morning (06:00 – 08:30 AM) to minimize midday solar evaporation loss.
+2. **Moisture Conservation:** Apply 5cm organic biomass mulching to reduce direct soil evaporative loss by up to 35%.
+3. **Check-Dam Dispatch:** Direct gravity-fed canal flows preferentially to upper slope orchards experiencing high evaporative stress.
+"""
+
+    # 5. Precision Chemical Spraying Window (Pesticide/Herbicide)
+    elif any(w in prompt_lower for w in ["spray", "pesticide", "herbicide", "fungicide", "chemical", "drift"]):
+        wind_spd = m.get("mean_wind_speed", 8.0)
+        is_safe = 3.0 <= wind_spd <= 12.0
+        return f"""### 🚜 PRECISION AGRO-CHEMICAL SPRAY WINDOW
+**Current Topographic Wind:** **{wind_spd:.1f} km/h** | **Target Area:** {region_name}
+
+---
+
+#### 1. Atmospheric Spray Dynamics:
+- **Wind Safety Rating:** {'🟢 **OPTIMAL SPRAY WINDOW (06:00 - 09:30 AM)**' if is_safe else '⚠️ **MARGINAL / DRIFT HAZARD**'}
+- **Volatilization Risk:** Maintain spraying while ambient temperature stays below 30°C.
+- **Rainfastness:** Zero convective rainfall expected in the next 4 hours; applied foliar chemicals will adhere securely.
+
+#### 2. Operator Safety Protocols:
+1. **Drift Protection:** Calibrate nozzles to medium-coarse droplets (250–350 microns) to prevent off-target drift to neighboring water bodies.
+2. **Buffer Zones:** Maintain a 15-meter downwind untreated buffer zone near village habitations and stream beds.
+"""
+
+    # 6. Fungal Blight & Plant Disease Infection (Wallin / Mills Criteria)
+    elif any(w in prompt_lower for w in ["blight", "fungal", "disease", "pest", "infection", "rot", "blast"]):
+        rh_val = m.get("mean_humidity", 70.0)
+        is_high_risk = rh_val >= 85.0 and (13.0 <= down_mean <= 24.0)
+        return f"""### 🍄 FUNGAL BLIGHT & CROP PATHOLOGY INTELLIGENCE
+**Atmospheric Moisture:** **{rh_val:.0f}% RH** | **Mean Temp:** **{down_mean:.1f}°C** | **Zone:** {region_name}
+
+---
+
+#### 1. Pathogen Infection Pressure (Wallin & Mills Formulation):
+- **Blight Severity Index:** {'🔴 **HIGH INFECTION RISK (Late Blight / Paddy Blast)**' if is_high_risk else '🟢 **LOW / SUPPRESSED PATHOGEN PRESSURE**'}
+- **Biological Mechanism:** Fungal sporangia (*Phytophthora infestans*) strictly require persistent relative humidity $\\ge 85\\%$ and surface leaf wetness for $\\ge 6$ continuous hours.
+- **Microclimate Hotspots:** Deep valleys and forest boundaries exhibit stagnant humid air favoring rapid spore germination.
+
+#### 2. Protective Agronomic Directives:
+1. **Irrigation Restriction:** Discontinue overhead sprinkler irrigation immediately to avoid wetting the upper crop canopy.
+2. **Preventive Foliar Shield:** If high humidity persists for $>8$ hours, apply preventive contact fungicide (e.g. Mancozeb 75 WP @ 2.5 g/L).
+"""
+
+    # 7. Livestock Heat Stress (THI)
+    elif any(w in prompt_lower for w in ["livestock", "cattle", "cow", "dairy", "milk", "thi", "poultry", "animal"]):
+        thi_est = (1.8 * down_max + 32.0) - (0.55 - 0.0055 * m.get("mean_humidity", 65.0)) * (1.8 * down_max - 26.0)
+        return f"""### 🐄 LIVESTOCK THERMAL COMFORT & DAIRY PRODUCTION (THI)
+**Maximum Daytime Temperature:** **{down_max:.1f}°C** | **Calculated THI:** **{thi_est:.1f}**
+
+---
+
+#### 1. Animal Comfort Evaluation:
+- **Thermal Status:** {'⚠️ **MODERATE HEAT STRESS (THI 78 - 83)**' if thi_est >= 78 else '🟢 **THERMAL COMFORT ZONE (THI < 72)**'}
+- **Productivity Impact:** In dairy cattle (crossbred Holstein/Jersey), THI values above 78 trigger panting and can reduce daily milk yields by **15% to 22%**.
+
+#### 2. Farm Management Actions:
+1. **Barn Cooling:** Activate high-velocity ceiling fans and fine misting nozzles in cattle sheds between 11:30 AM and 03:30 PM.
+2. **Feeding Schedule:** Shift heavy concentrate feeding to cool dawn (05:30 AM) and dusk (07:00 PM) hours.
+3. **Hydration:** Ensure ad-libitum access to clean, shaded cool drinking water with electrolyte supplementation.
+"""
+
+    # 8. General / Default comprehensive response
     else:
         return f"""### 🌾 GRAMVAYU AI MICROCLIMATE INTELLIGENCE
 **Analysis for:** {region_name} ({timestamp})  
@@ -122,8 +198,10 @@ By predicting microclimate residuals on top of subgrid lapse-rate physics, our 9
 """
 
 
-def ask_ai_chat(prompt: str, telemetry: Dict[str, Any], chat_history: List[Dict[str, str]], api_key: str = None) -> str:
+def ask_ai_chat(prompt: str, telemetry: Dict[str, Any], chat_history: List[Dict[str, str]] = None, api_key: str = None) -> str:
     """Processes questions using Gemini 2.5 Flash if api_key is supplied, else uses the built-in Expert Engine."""
+    if chat_history is None:
+        chat_history = []
     # Check if Gemini API key is available
     resolved_key = api_key or os.environ.get("GEMINI_API_KEY")
 

@@ -236,18 +236,17 @@ live_meta = data.get("live_meta", {})
 
 m1, m2, m3, m4, m5, m6 = st.columns(6)
 with m1:
-    st.metric("Downscaled Peak Max", f"{metrics.get('max_temp', 0):.1f}°C", delta="Warmest Valley/Face")
+    st.metric("1km Peak Max Temp", f"{metrics.get('max_temp', 0):.1f}°C", delta="Warmest Valley/Slope")
 with m2:
-    st.metric("Downscaled Valley Min", f"{metrics.get('min_temp', 0):.1f}°C", delta="Coldest Ridge/Pool", delta_color="inverse")
+    st.metric("1km Valley Min Temp", f"{metrics.get('min_temp', 0):.1f}°C", delta="Coldest Ridge/Pool", delta_color="inverse")
 with m3:
     st.metric("Subgrid Thermal Delta", f"{metrics.get('thermal_delta_c', 0):.1f}°C", help="Temperature spread caused by 1km microtopography")
 with m4:
-    elev_range = metrics.get("elevation_range_m", [0, 1000])
-    st.metric("Elevation Relief", f"{int(elev_range[1] - elev_range[0])}m", f"{int(elev_range[0])}m to {int(elev_range[1])}m")
+    st.metric("Relative Humidity", f"{metrics.get('mean_humidity', live_meta.get('mean_relative_humidity', 65.0)):.0f}%", "Boundary Layer")
 with m5:
-    st.metric("Live Wind Speed", f"{live_meta.get('mean_wind_speed_kmh', 10.0):.1f} km/h", "10m Vector Ingested")
+    st.metric("Surface Wind Speed", f"{metrics.get('mean_wind_speed', live_meta.get('mean_wind_speed_kmh', 10.0)):.1f} km/h", "Topographic Wind")
 with m6:
-    st.metric("Relative Humidity", f"{live_meta.get('mean_relative_humidity', 65.0):.0f}%", "Boundary Layer")
+    st.metric("Panchayat Water Loss", f"{metrics.get('mean_et0_mm', 3.2):.1f} mm/day", f"{int(metrics.get('mean_et0_mm', 3.2) * 10000):,} L/ha Irrigation")
 
 st.markdown("---")
 
@@ -264,15 +263,46 @@ tab_maps, tab_panchayats, tab_ground_stations, tab_ai = st.tabs([
 
 
 # ---------------------------------------------------------
-# TAB 1: HIGH-RES 1KM MAPS
+# TAB 1: HIGH-RES 1KM MAPS & INTERACTIVE SPATIAL HOVER INSPECTOR
 # ---------------------------------------------------------
 with tab_maps:
-    st.subheader("Spatial Downscaling Comparison (Coarse 10km vs High-Res 1km)")
-    st.caption("Bilinear Coarse NWP misses microclimates; Physics + ResAttnUNet resolves ridges, valley cold-air drainage, and windward cooling.")
+    st.subheader("Multi-Variable Spatial Downscaling (Coarse 10km vs High-Res 1km)")
+    st.caption("Select any essential climate variable to inspect its downscaled 1km micro-distribution.")
+
+    var_choice = st.radio(
+        "Select Weather Variable to Map:",
+        ["🌡️ Temperature (°C)", "💧 Relative Humidity (%)", "💨 Surface Wind (km/h)", "🌧️ Precipitation (mm)", "☀️ Evapotranspiration ET₀ (mm/day)"],
+        horizontal=True
+    )
 
     downscaled_arr = np.array(data["downscaled_grid"])
     coarse_arr = np.array(data["coarse_grid"])
     elev_arr = np.array(data["elevation_grid"])
+    rh_arr = np.array(data.get("humidity_grid", downscaled_arr))
+    wind_arr = np.array(data.get("wind_grid", downscaled_arr))
+    precip_arr = np.array(data.get("precip_grid", downscaled_arr))
+    et0_arr = np.array(data.get("et0_grid", downscaled_arr))
+
+    if "Temperature" in var_choice:
+        disp_arr = downscaled_arr
+        cmap_name = "coolwarm"
+        unit_lbl = "Temperature (°C)"
+    elif "Humidity" in var_choice:
+        disp_arr = rh_arr
+        cmap_name = "YlGnBu"
+        unit_lbl = "Relative Humidity (%)"
+    elif "Wind" in var_choice:
+        disp_arr = wind_arr
+        cmap_name = "plasma"
+        unit_lbl = "Wind Speed (km/h)"
+    elif "Precipitation" in var_choice:
+        disp_arr = precip_arr
+        cmap_name = "Blues"
+        unit_lbl = "Rainfall (mm)"
+    else:
+        disp_arr = et0_arr
+        cmap_name = "YlOrRd"
+        unit_lbl = "FAO-56 ET₀ (mm/day)"
 
     col_map1, col_map2, col_map3 = st.columns(3)
 
@@ -281,7 +311,7 @@ with tab_maps:
         fig1, ax1 = plt.subplots(figsize=(5.5, 4.5))
         im1 = ax1.imshow(coarse_arr, cmap="coolwarm")
         ax1.axis("off")
-        plt.colorbar(im1, ax=ax1, fraction=0.046, label="Temperature (°C)")
+        plt.colorbar(im1, ax=ax1, fraction=0.046, label="Coarse Temp (°C)")
         st.pyplot(fig1)
 
     with col_map2:
@@ -293,60 +323,92 @@ with tab_maps:
         st.pyplot(fig2)
 
     with col_map3:
-        st.markdown("**3. Physics + ResAttnUNet (1km Downscaled)**")
+        st.markdown(f"**3. Physics + ResAttnUNet (1km {var_choice.split(' ')[1]})**")
         fig3, ax3 = plt.subplots(figsize=(5.5, 4.5))
-        im3 = ax3.imshow(downscaled_arr, cmap="coolwarm")
+        im3 = ax3.imshow(disp_arr, cmap=cmap_name)
         ax3.axis("off")
-        plt.colorbar(im3, ax=ax3, fraction=0.046, label="Microclimate Temp (°C)")
+        plt.colorbar(im3, ax=ax3, fraction=0.046, label=unit_lbl)
         st.pyplot(fig3)
 
+    st.markdown("---")
+    st.markdown("### 🔎 Interactive 1km Grid Point Inspector (Cursor Hover)")
+    st.caption("Hover over any location in the region grid to read real-time microclimate values (Elevation, Temp, Humidity, Wind, Rain, and ET₀).")
+
+    # Stack multidimensional custom data for hover template
+    hover_custom = np.dstack((elev_arr, downscaled_arr, rh_arr, wind_arr, precip_arr, et0_arr))
+
+    fig_heat = go.Figure(data=go.Heatmap(
+        z=disp_arr,
+        colorscale="RdBu_r" if "Temperature" in var_choice else ("YlGnBu" if "Humidity" in var_choice or "Precipitation" in var_choice else "Viridis"),
+        colorbar=dict(title=unit_lbl),
+        customdata=hover_custom,
+        hovertemplate=(
+            "<b>1km Grid Cell [%{x}, %{y}]</b><br>" +
+            "🏔️ Elevation: %{customdata[0]:.0f} m<br>" +
+            "🌡️ Temperature: %{customdata[1]:.1f} °C<br>" +
+            "💧 Relative Humidity: %{customdata[2]:.0f} %<br>" +
+            "💨 Wind Speed: %{customdata[3]:.1f} km/h<br>" +
+            "🌧️ Precipitation: %{customdata[4]:.1f} mm<br>" +
+            "☀️ FAO-56 ET₀: %{customdata[5]:.1f} mm/day<br>" +
+            "<extra></extra>"
+        )
+    ))
+    fig_heat.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#1e2530",
+        plot_bgcolor="#151a23",
+        height=480,
+        margin=dict(l=20, r=20, t=30, b=20),
+        xaxis=dict(title="East-West Grid Distance (~1 km/pixel)", showgrid=False),
+        yaxis=dict(title="North-South Grid Distance (~1 km/pixel)", showgrid=False, scaleanchor="x")
+    )
+    st.plotly_chart(fig_heat, use_container_width=True)
+
 
 # ---------------------------------------------------------
-# TAB 2: GRAM PANCHAYAT INTELLIGENCE
+# TAB 2: GRAM PANCHAYAT AGRO-METEOROLOGICAL INTELLIGENCE
 # ---------------------------------------------------------
 with tab_panchayats:
-    st.subheader("Gram Panchayat Localized Microclimate Alerts")
-    st.markdown("Shows hyper-local temperatures across elevations in the selected block.")
+    st.subheader("🏛️ Gram Panchayat Localized Agro-Meteorological Intelligence")
+    st.markdown("Official IMD GKMS-format localized advisories (Frost, Fungal Blight, Chemical Spray Windows, and Irrigation Scheduling) for individual Panchayats.")
 
     panchayats = data.get("panchayats", [])
-    col_p1, col_p2 = st.columns([3, 2])
 
-    with col_p1:
-        for p in panchayats:
-            hazard_badge = f'<span style="color: #ef4444; font-weight: bold;">⚠️ {p["hazard"]}</span>' if "Alert" in p["hazard"] or "Pool" in p["hazard"] or "Stress" in p["hazard"] else '<span style="color: #10b981;">✔️ Nominal</span>'
-            st.markdown(f"""
-            <div class="metric-card">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <h4 style="margin: 0; color: #f3f4f6;">{p['name']}</h4>
-                    <span style="font-size: 18px; font-weight: bold; color: #3b82f6;">{p['temp']}°C</span>
-                </div>
-                <p style="margin: 4px 0 0 0; color: #9ca3af; font-size: 13px;">Elevation: {p['elevation']}m | Advisory Status: {hazard_badge}</p>
-            </div>
-            """, unsafe_allow_html=True)
+    for p in panchayats:
+        w_sum = p.get("weather_summary", {})
+        adv = p.get("advisories", {})
+        frost_b = adv.get("frost", {}).get("badge", "🟢 Frost Safe")
+        blight_b = adv.get("blight", {}).get("badge", "🟢 Disease Low")
+        spray_b = adv.get("spray_window", {}).get("badge", "🟢 Optimal Spray")
+        livestock_b = adv.get("livestock", {}).get("badge", "🟢 Normal")
 
-    with col_p2:
-        st.markdown("**Elevation vs Temperature Microclimate Profile**")
-        fig_p, ax_p = plt.subplots(figsize=(6, 4))
-        p_elevs = [p["elevation"] for p in panchayats]
-        p_temps = [p["temp"] for p in panchayats]
-        p_names = [p["name"].split(" ")[-2] if len(p["name"].split(" ")) > 1 else p["name"] for p in panchayats]
+        with st.expander(f"📍 **{p.get('panchayat_name', 'Panchayat')}** — Elev: {p.get('elevation_m', 500)}m | Action: {p.get('primary_action', 'Nominal')}", expanded=True):
+            # Row of 4 weather KPIs
+            k1, k2, k3, k4 = st.columns(4)
+            with k1:
+                st.metric("Temperature", f"{w_sum.get('temp_mean_c', 20.0):.1f}°C", f"Min {w_sum.get('temp_min_c', 15.0):.1f}° / Max {w_sum.get('temp_max_c', 25.0):.1f}°")
+            with k2:
+                st.metric("Moisture & Dew Point", f"{w_sum.get('relative_humidity_pct', 65)}%", f"Dew Point: {w_sum.get('dew_point_c', 15.0):.1f}°C (VPD: {w_sum.get('vapor_pressure_deficit_kpa', 0.8)} kPa)")
+            with k3:
+                st.metric("Wind & Rainfall", f"{w_sum.get('wind_speed_kmh', 8.0):.1f} km/h", f"Rain: {w_sum.get('precipitation_mm', 0.0):.1f} mm")
+            with k4:
+                st.metric("Irrigation Demand (ET₀)", f"{w_sum.get('evapotranspiration_et0_mm', 3.5):.1f} mm/day", f"{w_sum.get('irrigation_demand_liters_ha', 35000):,} L/ha")
 
-        ax_p.scatter(p_elevs, p_temps, color="#3b82f6", s=100, zorder=3)
-        for i, txt in enumerate(p_names):
-            ax_p.annotate(txt, (p_elevs[i], p_temps[i] + 0.2), fontsize=8, color="#f3f4f6")
-        ax_p.plot(np.sort(p_elevs), np.poly1d(np.polyfit(p_elevs, p_temps, 1))(np.sort(p_elevs)), "r--", alpha=0.7, label="Microclimate Gradient")
-        ax_p.set_xlabel("Elevation (m)")
-        ax_p.set_ylabel("Predicted 1km Temperature (°C)")
-        ax_p.set_title("Subgrid Altitude Lapse across Wards")
-        ax_p.legend()
-        ax_p.grid(True, linestyle="--", alpha=0.3)
-        fig_p.patch.set_facecolor('#1e2530')
-        ax_p.set_facecolor('#151a23')
-        ax_p.tick_params(colors='white')
-        ax_p.xaxis.label.set_color('white')
-        ax_p.yaxis.label.set_color('white')
-        ax_p.title.set_color('white')
-        st.pyplot(fig_p)
+            # Row of 4 Agromet Advisories
+            st.markdown("##### 🚨 Official Agromet Hazard & Operational Guidance")
+            a1, a2, a3, a4 = st.columns(4)
+            with a1:
+                st.markdown(f"**Frost Status:** {frost_b}")
+                st.caption(adv.get("frost", {}).get("action", "Temperature safely above freezing."))
+            with a2:
+                st.markdown(f"**Fungal Blight:** {blight_b}")
+                st.caption(adv.get("blight", {}).get("action", "Low pathogen pressure."))
+            with a3:
+                st.markdown(f"**Spray Window:** {spray_b}")
+                st.caption(adv.get("spray_window", {}).get("reason", "Conditions suitable."))
+            with a4:
+                st.markdown(f"**Livestock Safety:** {livestock_b}")
+                st.caption(adv.get("livestock", {}).get("action", "Thermal comfort zone."))
 
 
 # ---------------------------------------------------------
@@ -505,14 +567,25 @@ with tab_ai:
 
     if st.button("Generate Agro-Climatic Advisory", type="primary"):
         with st.spinner("AI Advisor analyzing 1km microclimate gradients..."):
+            elev_r = metrics.get("elevation_range_m", [500, 1500])
             context = {
-                "region": data.get("region_name", "Current Region"),
-                "min_temp": metrics.get("min_temp"),
-                "max_temp": metrics.get("max_temp"),
-                "elevation_range": metrics.get("elevation_range_m"),
-                "thermal_delta": metrics.get("thermal_delta_c"),
-                "wind_speed": live_meta.get("mean_wind_speed_kmh"),
-                "humidity": live_meta.get("mean_relative_humidity"),
+                "region_name": data.get("region_name", "Current Region"),
+                "mode": mode_val if "mode_val" in locals() else "live",
+                "timestamp_label": datetime.datetime.now().strftime("%Y-%m-%d %H:%M UTC"),
+                "metrics": {
+                    "downscaled_min": metrics.get("min_temp", 15.0),
+                    "downscaled_max": metrics.get("max_temp", 28.0),
+                    "downscaled_mean": metrics.get("mean_temp", 22.0),
+                    "coarse_mean": live_meta.get("mean_temp_c", 22.0),
+                    "valley_ridge_delta": metrics.get("thermal_delta_c", 6.0),
+                    "max_cooling_delta": -4.0,
+                    "max_heating_delta": 3.0,
+                    "elevation_min": elev_r[0],
+                    "elevation_max": elev_r[1],
+                    "mean_humidity": metrics.get("mean_humidity", 65.0),
+                    "mean_wind_speed": metrics.get("mean_wind_speed", 10.0),
+                    "mean_et0_mm": metrics.get("mean_et0_mm", 3.5)
+                },
                 "panchayats": data.get("panchayats", [])
             }
             try:

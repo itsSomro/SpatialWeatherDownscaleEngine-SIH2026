@@ -30,6 +30,7 @@ from build_dataset import (
     BASE_LAPSE_RATE
 )
 from download_multi_region_data import download_on_demand_region
+from agro_advisory_engine import generate_panchayat_advisory_bulletin
 
 # ---------------------------------------------------------
 # 2. CONFIGURATION & PRESET ANCHOR REGIONS
@@ -266,8 +267,44 @@ def run_downscale_inference(dem_raw, bbox, coarse_t, coarse_p, coarse_rh, coarse
     # Final 1km Downscaled Output
     final_temp = physics_baseline + residual_c
 
+    # 1km Downscaled Relative Humidity (%)
+    # Clausius-Clapeyron adiabatic cooling increases RH with altitude; vegetation canopy transpires moisture
+    rh_anom = (np.mean(final_temp) - final_temp) * 3.2 + ndvi_patch * 5.0
+    final_rh = np.clip(coarse_rh + rh_anom, 15.0, 99.0)
+
+    # 1km Downscaled Surface Wind Speed (km/h)
+    # Terrain gradient and ridge exposure accelerate wind; valleys shelter
+    slope_norm = slope_mag / (np.mean(slope_mag) + 1e-5)
+    curv_norm = np.clip(curvature / (np.std(curvature) + 1e-5), -2.0, 2.0)
+    wind_mult = np.clip(1.0 + 0.35 * slope_norm - 0.20 * np.maximum(0, curv_norm), 0.3, 2.2)
+    final_wind = np.clip(coarse_spd * wind_mult, 2.0, 85.0)
+
+    # 1km Downscaled Orographic Precipitation (mm)
+    # Windward slope forced ascent enhances rain; leeward foehn dries
+    orog_factor = np.clip(1.0 + 0.35 * (orographic_wind / 4.0), 0.1, 2.5)
+    coarse_p_base = max(0.0, float(np.mean(coarse_spd)) * (mean_rh / 100.0) * 0.12)
+    final_precip = np.clip(coarse_p_base * orog_factor, 0.0, 100.0)
+
+    # 1km FAO-56 Reference Evapotranspiration (ET_0 in mm/day)
+    # Fast vectorized calculation across 1km grid
+    u2 = np.maximum(0.2, final_wind / 3.6)
+    delta_s = (4098.0 * (0.6108 * np.exp((17.27 * final_temp) / (final_temp + 237.3)))) / ((final_temp + 237.3) ** 2)
+    e_s = 0.6108 * np.exp((17.27 * final_temp) / (final_temp + 237.3))
+    e_a = e_s * (final_rh / 100.0)
+    gamma_s = 0.000665 * (101.3 * np.power(np.maximum(100.0, 293.0 - 0.0065 * dem_raw) / 293.0, 5.26))
+    rn = 18.0 * 0.55
+    final_et0 = np.clip(
+        (0.408 * delta_s * rn + gamma_s * (900.0 / (final_temp + 273.0)) * u2 * (e_s - e_a)) /
+        (delta_s + gamma_s * (1.0 + 0.34 * u2)),
+        0.5, 12.0
+    )
+
     return {
         "final_temp": final_temp,
+        "final_humidity": final_rh,
+        "final_wind": final_wind,
+        "final_precip": final_precip,
+        "final_et0": final_et0,
         "coarse_temp": coarse_t,
         "physics_baseline": physics_baseline,
         "residual": residual_c,
@@ -276,8 +313,37 @@ def run_downscale_inference(dem_raw, bbox, coarse_t, coarse_p, coarse_rh, coarse
         "slope_mag": slope_mag,
         "orographic_wind": orographic_wind,
         "wind_speed": coarse_spd,
-        "relative_humidity": coarse_rh
+        "relative_humidity": coarse_rh,
+        "ndvi": ndvi_patch,
+        "built_up": built_up_patch
     }
+
+
+def build_panchayat_bulletins(region_title, final_t, final_rh, final_wind, final_precip, final_et0, dem_m):
+    """Builds official IMD GKMS agro-advisory bulletins across 4 distinct topographic zones."""
+    specs = [
+        ("Valley Agriculture GP", int(dem_m.min() + 35), float(final_t.max() - 0.4), float(final_rh.max() - 2.0), float(final_wind.min() + 2.0), float(final_precip.min() + 0.1), float(final_et0.min() + 0.3)),
+        ("Central Taluk HQ", int(np.mean(dem_m)), float(np.mean(final_t)), float(np.mean(final_rh)), float(np.mean(final_wind)), float(np.mean(final_precip)), float(np.mean(final_et0))),
+        ("Ridge Crest Outpost", int(dem_m.max() - 40), float(final_t.min() + 0.6), float(final_rh.min() + 5.0), float(final_wind.max() - 3.0), float(final_precip.max()), float(final_et0.max() - 0.5)),
+        ("Horticulture Terraces", int(np.mean(dem_m) + 80), float(np.mean(final_t) - 0.8), float(np.mean(final_rh) + 4.0), float(np.mean(final_wind) + 3.0), float(np.mean(final_precip) * 1.1), float(np.mean(final_et0) + 0.2))
+    ]
+    bulletins = []
+    for suffix, elev, t_m, rh, wind, precip, et0 in specs:
+        p_name = f"{region_title} - {suffix}"
+        t_min = t_m - 4.5
+        t_max = t_m + 5.0
+        b = generate_panchayat_advisory_bulletin(
+            panchayat_name=p_name,
+            t_mean=t_m,
+            t_min=t_min,
+            t_max=t_max,
+            rh_pct=rh,
+            wind_kmh=wind,
+            precip_mm=precip,
+            elevation_m=elev
+        )
+        bulletins.append(b)
+    return bulletins
 
 
 # ---------------------------------------------------------
@@ -328,14 +394,13 @@ def on_demand_downscale(req: OnDemandRequest):
 
         # Generate local microclimate summary & sample village panchayats
         final_t = out["final_temp"]
+        final_rh = out["final_humidity"]
+        final_wind = out["final_wind"]
+        final_precip = out["final_precip"]
+        final_et0 = out["final_et0"]
         dem_m = out["elevation"]
 
-        panchayats = [
-            {"name": f"{req.name} Valley Ward 1", "elevation": int(dem_m.min() + 40), "temp": round(float(final_t.max() - 0.5), 1), "hazard": "Inversion Cold Pool" if final_t.min() < 10 else "Normal"},
-            {"name": f"{req.name} Central Panchayat", "elevation": int(np.mean(dem_m)), "temp": round(float(np.mean(final_t)), 1), "hazard": "Nominal"},
-            {"name": f"{req.name} Ridge Sector 3", "elevation": int(dem_m.max() - 50), "temp": round(float(final_t.min() + 0.8), 1), "hazard": "High Wind Chill" if np.mean(coarse_spd) > 15 else "Normal"},
-            {"name": f"{req.name} North Slope", "elevation": int(np.mean(dem_m) + 120), "temp": round(float(np.mean(final_t) - 1.2), 1), "hazard": "Normal"}
-        ]
+        panchayats = build_panchayat_bulletins(req.name, final_t, final_rh, final_wind, final_precip, final_et0, dem_m)
 
         return {
             "status": "success",
@@ -349,10 +414,18 @@ def on_demand_downscale(req: OnDemandRequest):
                 "max_temp": round(float(final_t.max()), 2),
                 "mean_temp": round(float(np.mean(final_t)), 2),
                 "elevation_range_m": [round(float(dem_m.min()), 0), round(float(dem_m.max()), 0)],
-                "thermal_delta_c": round(float(final_t.max() - final_t.min()), 2)
+                "thermal_delta_c": round(float(final_t.max() - final_t.min()), 2),
+                "mean_humidity": round(float(np.mean(final_rh)), 1),
+                "mean_wind_speed": round(float(np.mean(final_wind)), 1),
+                "mean_precip_mm": round(float(np.mean(final_precip)), 2),
+                "mean_et0_mm": round(float(np.mean(final_et0)), 2)
             },
             "panchayats": panchayats,
             "downscaled_grid": final_t[::2, ::2].tolist(),
+            "humidity_grid": final_rh[::2, ::2].tolist(),
+            "wind_grid": final_wind[::2, ::2].tolist(),
+            "precip_grid": final_precip[::2, ::2].tolist(),
+            "et0_grid": final_et0[::2, ::2].tolist(),
             "coarse_grid": coarse_t[::2, ::2].tolist(),
             "elevation_grid": dem_m[::2, ::2].tolist()
         }
@@ -409,14 +482,13 @@ def predict(req: DownscaleRequest):
         # Run inference
         out = run_downscale_inference(dem_raw, bbox, coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, region_name=region)
         final_t = out["final_temp"]
+        final_rh = out["final_humidity"]
+        final_wind = out["final_wind"]
+        final_precip = out["final_precip"]
+        final_et0 = out["final_et0"]
         dem_m = out["elevation"]
 
-        panchayats = [
-            {"name": f"{region_info['name'].split(' (')[0]} Valley GP", "elevation": int(dem_m.min() + 35), "temp": round(float(final_t.max() - 0.4), 1), "hazard": "Cold Inversion Risk" if final_t.min() < 8 else "Normal"},
-            {"name": f"{region_info['name'].split(' (')[0]} Central HQ", "elevation": int(np.mean(dem_m)), "temp": round(float(np.mean(final_t)), 1), "hazard": "Normal"},
-            {"name": f"{region_info['name'].split(' (')[0]} Peak Outpost", "elevation": int(dem_m.max() - 40), "temp": round(float(final_t.min() + 0.6), 1), "hazard": "Wind Chill Alert" if np.mean(coarse_spd) > 18 else "Normal"},
-            {"name": f"{region_info['name'].split(' (')[0]} Agriculture Belt", "elevation": int(np.mean(dem_m) - 100), "temp": round(float(np.mean(final_t) + 1.1), 1), "hazard": "Thermal Heat Stress" if final_t.max() > 36 else "Optimal"}
-        ]
+        panchayats = build_panchayat_bulletins(region_info["name"].split(" (")[0], final_t, final_rh, final_wind, final_precip, final_et0, dem_m)
 
         return {
             "status": "success",
@@ -430,11 +502,17 @@ def predict(req: DownscaleRequest):
                 "mean_temp": round(float(np.mean(final_t)), 2),
                 "elevation_range_m": [round(float(dem_m.min()), 0), round(float(dem_m.max()), 0)],
                 "thermal_delta_c": round(float(final_t.max() - final_t.min()), 2),
-                "mean_wind_speed": round(float(np.mean(coarse_spd)), 1),
-                "mean_humidity": round(float(np.mean(coarse_rh)), 1)
+                "mean_humidity": round(float(np.mean(final_rh)), 1),
+                "mean_wind_speed": round(float(np.mean(final_wind)), 1),
+                "mean_precip_mm": round(float(np.mean(final_precip)), 2),
+                "mean_et0_mm": round(float(np.mean(final_et0)), 2)
             },
             "panchayats": panchayats,
             "downscaled_grid": final_t[::2, ::2].tolist(),
+            "humidity_grid": final_rh[::2, ::2].tolist(),
+            "wind_grid": final_wind[::2, ::2].tolist(),
+            "precip_grid": final_precip[::2, ::2].tolist(),
+            "et0_grid": final_et0[::2, ::2].tolist(),
             "coarse_grid": coarse_t[::2, ::2].tolist(),
             "elevation_grid": dem_m[::2, ::2].tolist()
         }

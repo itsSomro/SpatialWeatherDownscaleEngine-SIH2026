@@ -9,7 +9,8 @@ import matplotlib.colors as mcolors
 import streamlit as st
 
 # Add scripts directory to path
-SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+ROOT_DIR = Path(__file__).resolve().parent.parent
+SCRIPTS_DIR = ROOT_DIR / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 from ai_advisor import ask_ai_chat
 
@@ -169,12 +170,7 @@ with st.sidebar:
         mode_val = "live"
         archive_date = "2023-05-15"
 
-    st.markdown("---")
-    st.markdown("### 🏆 SIH 2026 Core Pillars")
-    st.markdown("✔️ **Phase 1:** Multi-Region Multi-Season Scaled Data")
-    st.markdown("✔️ **Phase 2:** Real NOAA/IMD Ground Sensor Benchmark")
-    st.markdown("✔️ **Phase 3:** 14-Channel Wind Vectors & Moisture")
-    st.markdown("✔️ **Phase 4:** Residual Attention U-Net (ResAttnUNet)")
+
 
 
 # ---------------------------------------------------------

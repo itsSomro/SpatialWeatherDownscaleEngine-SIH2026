@@ -1,11 +1,11 @@
 """
-Universal 14-Channel Multi-Region Dataset Builder (SIH 2026)
+Universal 16-Channel Multi-Region Dataset Builder (SIH 2026)
 ------------------------------------------------------------
-Constructs high-precision 14-channel physics-guided datasets across diverse physiographic
-zones in India (Himalayas, Western Ghats, Deccan Plateau, Indo-Gangetic Plains, Coast)
-and across contrasting seasons (Winter, Summer, Monsoon, Post-monsoon).
+Constructs high-precision 16-channel physics-guided datasets across diverse physiographic
+zones in India (Himalayas, Western Ghats, Deccan Plateau, Indo-Gangetic Plains)
+across 4 contrasting seasons (Winter, Summer, Monsoon, Post-monsoon).
 
-14 INPUT CHANNELS:
+16 INPUT CHANNELS:
     0. coarse_temp         -- Coarse NWP / ERA5 2m temperature (°C)
     1. coarse_pressure     -- Coarse ERA5 surface pressure (hPa)
     2. elevation           -- 1km DEM (meters, globally normalized)
@@ -20,6 +20,8 @@ and across contrasting seasons (Winter, Summer, Monsoon, Post-monsoon).
    11. wind_speed          -- 10m Wind magnitude sqrt(u^2 + v^2) (m/s)
    12. orographic_wind     -- Wind-slope dot product (v . grad(z)) / (|grad| + eps)
    13. relative_humidity   -- 2m Relative humidity (0 to 100%)
+   14. ndvi                -- Fractional vegetation cover / greenness (0.0 to 1.0)
+   15. built_up            -- Urban impervious surface fraction (0.0 to 1.0)
 
 PHYSICS GROUND TRUTH & RESIDUAL FORMULATION:
     T_physics = coarse_temp - Gamma_effective * subgrid_dz
@@ -28,9 +30,11 @@ PHYSICS GROUND TRUTH & RESIDUAL FORMULATION:
     where:
       - subgrid_dz = dem_patch - dem_coarse_10km
       - Gamma_effective = Gamma_base * (1.0 - 0.35 * (RH / 100.0))
-      - Solar aspect heating peaks at noon, zero at night
-      - Cold-air drainage in concave valleys is damped by wind turbulence mixing: exp(-wind_speed / 3.0)
+      - Solar aspect heating on south-facing slopes peaks at noon
+      - Cold-air drainage in concave valleys is damped by wind mixing: exp(-wind_speed / 3.0)
       - Orographic windward forced ascent cools; leeward descending air warms (foehn effect)
+      - Vegetation (NDVI) cools via latent heat transpiration (-0.55 * ndvi * solar_mult)
+      - Urban Heat Island (Built-up) warms via thermal storage (+1.60 * built_up * (1 + 0.5 * night_mult))
 """
 
 import os
@@ -55,20 +59,23 @@ SEED = 42
 SLOPE_ASPECT_COEFF = 0.65      # deg C solar heating strength
 VALLEY_COOLING_COEFF = 0.55    # deg C cold pool drainage strength
 WIND_OROGRAPHIC_COEFF = 0.40   # deg C windward/leeward effect strength
+VEG_COOLING_COEFF = 0.55       # deg C evaporative cooling strength
+URBAN_HEAT_COEFF = 1.60        # deg C urban heat island strength
 
 INPUT_CHANNELS = [
     "coarse_temp", "coarse_pressure", "elevation", "lat", "lon",
     "slope_mag", "aspect_x", "aspect_y", "curvature",
-    "wind_u", "wind_v", "wind_speed", "orographic_wind", "relative_humidity"
+    "wind_u", "wind_v", "wind_speed", "orographic_wind", "relative_humidity",
+    "ndvi", "built_up"
 ]
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
-GLOBAL_STATS_PATH = DATA_DIR / "norm_stats_14ch.json"
+GLOBAL_STATS_PATH = DATA_DIR / "norm_stats_16ch.json"
 
 
 # ---------------------------------------------------------------------------
-# 1. TERRAIN DIFFERENTIAL GEOMETRY & PHYSICS OPERATORS
+# 1. TERRAIN & LAND SURFACE OPERATORS
 # ---------------------------------------------------------------------------
 def compute_terrain_derivatives(dem_patch):
     """Computes slope magnitude, unit aspect vectors, and curvature (Laplacian)."""
@@ -92,12 +99,7 @@ def compute_subgrid_elevation_anomaly(dem_patch, factor=DOWNSAMPLE_FACTOR):
 
 
 def compute_orographic_wind_exposure(dem_patch, wind_u_patch, wind_v_patch):
-    """
-    Computes normalized dot product of wind vector with terrain gradient:
-    v . grad(z) / (|grad(z)| + eps)
-    Positive -> wind blows uphill (orographic lift / cooling)
-    Negative -> wind blows downhill (lee slope / foehn warming)
-    """
+    """Computes normalized dot product of wind vector with terrain gradient."""
     dzdy, dzdx = np.gradient(dem_patch)
     slope_mag = np.sqrt(dzdx ** 2 + dzdy ** 2)
     norm = slope_mag + 1e-4
@@ -105,8 +107,41 @@ def compute_orographic_wind_exposure(dem_patch, wind_u_patch, wind_v_patch):
     return orographic_exposure.astype(np.float32)
 
 
+def compute_land_cover_channels(dem_patch, region_key=""):
+    """
+    Computes high-resolution 1km NDVI (Vegetation Greenness) and Built-up (Urban Fraction).
+    - Mountain slopes below treeline (3,600m): dense pine/deodar/shola forest (NDVI 0.65-0.85).
+    - High alpine peaks (>3,600m): rocky tundra and snow (NDVI 0.05-0.20).
+    - Urban centers (Shimla ridge, Bangalore core, Agra, towns): high impervious surface (0.60-0.85),
+      which suppresses local vegetation and creates the Urban Heat Island.
+    """
+    h, w = dem_patch.shape
+    # Elevation-driven vegetation canopy
+    elev = np.clip(dem_patch, 0, 6000)
+    base_ndvi = np.where(elev > 3800, 0.08, np.where(elev > 3000, 0.40, 0.78)).astype(np.float32)
+
+    # Plains adjustment
+    if "indo_gangetic" in region_key or "deccan" in region_key:
+        base_ndvi = np.clip(base_ndvi * 0.70, 0.25, 0.65)
+
+    # Urban Settlement Core (centered or prominent nodes)
+    built_up = np.zeros((h, w), dtype=np.float32)
+    cy, cx = h // 2, w // 2
+    y, x = np.ogrid[:h, :w]
+    dist_sq = ((y - cy) / 10.0) ** 2 + ((x - cx) / 10.0) ** 2
+    urban_decay = np.exp(-dist_sq).astype(np.float32)
+
+    if any(k in region_key for k in ["shimla", "himalayas", "deccan", "indo_gangetic", "chikmagaluru", "kodagu"]):
+        built_up = 0.75 * urban_decay
+        # Urban displaces forest
+        ndvi = np.clip(base_ndvi * (1.0 - 0.75 * built_up), 0.08, 0.88).astype(np.float32)
+    else:
+        ndvi = base_ndvi
+
+    return ndvi, built_up
+
+
 def compute_lonlat_grids(bbox, patch_size=PATCH_SIZE):
-    """Constructs pixel-center latitude and longitude grids from bounding box (N, W, S, E)."""
     north, west, south, east = bbox
     lat_vec = np.linspace(north, south, patch_size, dtype=np.float32)
     lon_vec = np.linspace(west, east, patch_size, dtype=np.float32)
@@ -115,55 +150,54 @@ def compute_lonlat_grids(bbox, patch_size=PATCH_SIZE):
     return lat_grid, lon_grid
 
 
-# ---------------------------------------------------------------------------
-# 2. MICROCLIMATE SYNTHESIS FOR GROUND TRUTH (14 Channels)
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------
+# 2. MICROCLIMATE SYNTHESIS (16 Channels)
+# ---------------------------------------------------------
 def synthesize_ground_truth_and_residual(
     dem_patch, coarse_temp_slice, coarse_press_slice,
     wind_u_slice, wind_v_slice, wind_speed_slice, rh_slice,
+    ndvi_patch, built_up_patch,
     t_hour, rng
 ):
-    """
-    Generates high-resolution pseudo ground truth Y incorporating:
-    - Subgrid lapse rate modulated by relative humidity
-    - Solar slope heating (midday peak)
-    - Nocturnal cold-air pooling suppressed by wind turbulence mixing
-    - Orographic windward cooling vs leeward foehn warming
-    """
     subgrid_dz = compute_subgrid_elevation_anomaly(dem_patch)
     slope_mag, aspect_x, aspect_y, curvature = compute_terrain_derivatives(dem_patch)
     orographic_wind = compute_orographic_wind_exposure(dem_patch, wind_u_slice, wind_v_slice)
 
-    # Moisture-adjusted effective lapse rate: saturated air cools at a lower rate
+    # Moisture-adjusted effective lapse rate
     mean_rh = float(np.mean(rh_slice))
     effective_lapse_rate = BASE_LAPSE_RATE * (1.0 - 0.35 * (mean_rh / 100.0))
     effective_lapse_rate += rng.uniform(-LAPSE_RATE_JITTER, LAPSE_RATE_JITTER)
 
-    # 1. Physical subgrid lapse rate baseline
+    # 1. Physics baseline
     T_physics = coarse_temp_slice - effective_lapse_rate * subgrid_dz
 
     # 2. Dynamic solar slope heating
     solar_mult = max(0.0, np.sin(np.pi * (t_hour - 6) / 12)) if 6 <= t_hour <= 18 else 0.0
     slope_norm = np.clip(slope_mag / (slope_mag.std() + 1e-5), 0, 3.0)
-    southness = aspect_y  # aspect_y points south in Northern Hemisphere
+    southness = aspect_y
     delta_T_solar = SLOPE_ASPECT_COEFF * solar_mult * southness * slope_norm
 
-    # 3. Nocturnal cold air drainage damped by wind mixing
+    # 3. Cold air drainage damped by wind mixing
     mean_wind = float(np.mean(wind_speed_slice))
-    wind_mixing_damping = np.exp(-mean_wind / 3.0)  # wind destroys the inversion
+    wind_mixing_damping = np.exp(-mean_wind / 3.0)
     pooling_mult = max(0.0, np.cos(np.pi * (t_hour - 4) / 12)) if (t_hour <= 9 or t_hour >= 20) else 0.0
     curv_norm = curvature / (curvature.std() + 1e-5)
-    valley_strength = np.clip(curv_norm, 0, 3.0)
-    delta_T_pooling = -VALLEY_COOLING_COEFF * pooling_mult * valley_strength * wind_mixing_damping
+    delta_T_pooling = -VALLEY_COOLING_COEFF * pooling_mult * np.clip(curv_norm, 0, 3.0) * wind_mixing_damping
 
-    # 4. Windward cooling / leeward foehn warming
+    # 4. Windward cooling / foehn warming
     delta_T_wind = -WIND_OROGRAPHIC_COEFF * np.clip(orographic_wind / 5.0, -2.0, 2.0)
 
-    # High-resolution ground truth
-    Y = T_physics + delta_T_solar + delta_T_pooling + delta_T_wind
+    # 5. Vegetation evaporative cooling (daytime transpiration)
+    delta_T_veg = -VEG_COOLING_COEFF * ndvi_patch * (0.3 + 0.7 * solar_mult)
+
+    # 6. Urban Heat Island (daytime sensible storage + nocturnal release)
+    night_mult = 1.0 - solar_mult
+    delta_T_urban = URBAN_HEAT_COEFF * built_up_patch * (1.0 + 0.5 * night_mult)
+
+    # Ground truth Y
+    Y = T_physics + delta_T_solar + delta_T_pooling + delta_T_wind + delta_T_veg + delta_T_urban
     Y += rng.normal(0, NOISE_STD_C, size=Y.shape)
 
-    # Residual target: what remains after subtracting the physics baseline
     residual = Y - T_physics
 
     return {
@@ -175,23 +209,22 @@ def synthesize_ground_truth_and_residual(
         "aspect_y": aspect_y,
         "curvature": curvature,
         "orographic_wind": orographic_wind,
-        "subgrid_dz": subgrid_dz
+        "ndvi": ndvi_patch,
+        "built_up": built_up_patch
     }
 
 
-# ---------------------------------------------------------------------------
-# 3. BUILD TRAINING SAMPLES FOR A REGION
-# ---------------------------------------------------------------------------
-def build_region_samples(region_key, seasons=("summer", "winter")):
-    """Builds raw unnormalized samples for a region across seasons."""
+# ---------------------------------------------------------
+# 3. BUILD REGION SAMPLES (Dense Sampling Across All 4 Seasons)
+# ---------------------------------------------------------
+def build_region_samples(region_key):
     region_dir = DATA_DIR / region_key
     dem_npy = region_dir / f"dem_{region_key}_1km.npy"
 
     if not dem_npy.exists():
-        # Try loading and resampling raw TIF
         tif_path = region_dir / f"dem_{region_key}_raw.tif"
         if not tif_path.exists():
-            raise FileNotFoundError(f"No DEM found for region {region_key} in {region_dir}")
+            raise FileNotFoundError(f"No DEM found for region {region_key}")
         with rasterio.open(tif_path) as src:
             scale = src.res[0] / (1 / 111.0)
             new_h = max(PATCH_SIZE, int(src.height * scale))
@@ -201,7 +234,6 @@ def build_region_samples(region_key, seasons=("summer", "winter")):
     else:
         dem_1km = np.load(dem_npy).astype(np.float32)
 
-    # Crop/pad center patch to PATCH_SIZE
     h, w = dem_1km.shape
     top = max(0, (h - PATCH_SIZE) // 2)
     left = max(0, (w - PATCH_SIZE) // 2)
@@ -209,15 +241,12 @@ def build_region_samples(region_key, seasons=("summer", "winter")):
     if dem_patch.shape != (PATCH_SIZE, PATCH_SIZE):
         dem_patch = zoom(dem_1km, (PATCH_SIZE / h, PATCH_SIZE / w), order=1)
 
-    # Load metadata for bounding box
     meta_path = region_dir / "meta.json"
-    if meta_path.exists():
-        with open(meta_path) as f:
-            bbox = json.load(f)["bbox"]
-    else:
-        bbox = (13.5, 75.2, 12.5, 76.2)
-
+    bbox = json.load(open(meta_path))["bbox"] if meta_path.exists() else (13.5, 75.2, 12.5, 76.2)
     lat_grid, lon_grid = compute_lonlat_grids(bbox, PATCH_SIZE)
+
+    # Compute land cover channels
+    ndvi_patch, built_up_patch = compute_land_cover_channels(dem_patch, region_key)
 
     rng = np.random.default_rng(SEED)
     collected = {ch: [] for ch in INPUT_CHANNELS}
@@ -225,25 +254,22 @@ def build_region_samples(region_key, seasons=("summer", "winter")):
     collected["residual"] = []
     collected["T_physics"] = []
 
-    # Find available seasonal NPZ files
     npz_files = list(region_dir.glob("era5_*_*.npz"))
     if not npz_files:
-        print(f"Warning: No seasonal NPZ files found in {region_dir}")
+        print(f"Warning: No seasonal weather NPZ files in {region_dir}")
         return {}
 
+    # Dense sampling step = 2 (every 2 hours) across ALL 4 seasons
+    step = 2
     for npz_file in npz_files:
         season_data = np.load(npz_file)
-        temp_grid = season_data["temperature_2m"]        # (T, 4, 4)
-        press_grid = season_data["surface_pressure"]     # (T, 4, 4)
-        rh_grid = season_data["relative_humidity_2m"]    # (T, 4, 4)
-        wind_u_grid = season_data["wind_u_10m"]          # (T, 4, 4)
-        wind_v_grid = season_data["wind_v_10m"]          # (T, 4, 4)
-        wind_spd_grid = season_data["wind_speed_10m"]    # (T, 4, 4)
-
+        temp_grid = season_data["temperature_2m"]
+        press_grid = season_data["surface_pressure"]
+        rh_grid = season_data["relative_humidity_2m"]
+        wind_u_grid = season_data["wind_u_10m"]
+        wind_v_grid = season_data["wind_v_10m"]
+        wind_spd_grid = season_data["wind_speed_10m"]
         n_timesteps = temp_grid.shape[0]
-        # Step through every 3rd hour to balance diversity and volume
-        step = 3
-        print(f"Processing {region_key} [{npz_file.stem}]: {n_timesteps} steps, sampling every {step}h...")
 
         for t in range(0, n_timesteps, step):
             zy = PATCH_SIZE / temp_grid[t].shape[0]
@@ -259,10 +285,10 @@ def build_region_samples(region_key, seasons=("summer", "winter")):
             t_hour = t % 24
             synth = synthesize_ground_truth_and_residual(
                 dem_patch, coarse_t, coarse_p, coarse_u, coarse_v, coarse_spd, coarse_rh,
-                t_hour, rng
+                ndvi_patch, built_up_patch, t_hour, rng
             )
 
-            # Add sample (with horizontal flip augmentation)
+            # Flip augmentation
             for flip in (False, True):
                 d_p = np.fliplr(dem_patch) if flip else dem_patch
                 c_t = np.fliplr(coarse_t) if flip else coarse_t
@@ -278,6 +304,8 @@ def build_region_samples(region_key, seasons=("summer", "winter")):
                 spd_p = np.fliplr(coarse_spd) if flip else coarse_spd
                 orog = np.fliplr(synth["orographic_wind"]) if flip else synth["orographic_wind"]
                 rh_p = np.fliplr(coarse_rh) if flip else coarse_rh
+                nd_p = np.fliplr(synth["ndvi"]) if flip else synth["ndvi"]
+                bu_p = np.fliplr(synth["built_up"]) if flip else synth["built_up"]
 
                 y_p = np.fliplr(synth["Y"]) if flip else synth["Y"]
                 res_p = np.fliplr(synth["residual"]) if flip else synth["residual"]
@@ -297,6 +325,8 @@ def build_region_samples(region_key, seasons=("summer", "winter")):
                 collected["wind_speed"].append(spd_p)
                 collected["orographic_wind"].append(orog)
                 collected["relative_humidity"].append(rh_p)
+                collected["ndvi"].append(nd_p)
+                collected["built_up"].append(bu_p)
 
                 collected["Y"].append(y_p)
                 collected["residual"].append(res_p)
@@ -305,26 +335,19 @@ def build_region_samples(region_key, seasons=("summer", "winter")):
     return {k: np.stack(v) for k, v in collected.items()}
 
 
-# ---------------------------------------------------------------------------
-# 4. UNIVERSAL MULTI-REGION DATASET BUILDER
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------
+# 4. UNIVERSAL MULTI-REGION BUILDER
+# ---------------------------------------------------------
 def build_universal_dataset(regions=None, out_npz=None, stats_path=None):
-    """
-    Merges diverse physiographic regions into a universal 14-channel training corpus.
-    Applies global scale-free normalization to guarantee transferability to any region.
-    """
     if regions is None:
         regions = ["himalayas_kullu", "deccan_plateau", "indo_gangetic_plain", "chikmagaluru"]
-
     if out_npz is None:
-        out_npz = DATA_DIR / "training_dataset_multiregion.npz"
+        out_npz = DATA_DIR / "training_dataset_multiregion_16ch.npz"
     if stats_path is None:
         stats_path = GLOBAL_STATS_PATH
 
     print("=" * 80)
-    print(f"BUILDING UNIVERSAL 14-CHANNEL DATASET ACROSS {len(regions)} REGIONS:")
-    for r in regions:
-        print(f"  - {r}")
+    print(f"BUILDING UNIVERSAL 16-CHANNEL SCALED DATASET ({len(regions)} REGIONS, 4 SEASONS, DENSE 2H STEP)")
     print("=" * 80)
 
     all_data = {ch: [] for ch in INPUT_CHANNELS}
@@ -333,19 +356,18 @@ def build_universal_dataset(regions=None, out_npz=None, stats_path=None):
     all_data["T_physics"] = []
 
     for r in regions:
+        print(f"Processing region {r}...")
         r_data = build_region_samples(r)
         if not r_data:
             continue
         for k in all_data:
             all_data[k].append(r_data[k])
-        print(f"Added {r_data['Y'].shape[0]} samples from {r}")
+        print(f"  -> Added {r_data['Y'].shape[0]} samples from {r}")
 
-    # Concatenate across all regions
     stacked = {k: np.concatenate(v, axis=0) for k, v in all_data.items()}
     n_samples = stacked["Y"].shape[0]
-    print(f"\nTotal Multi-Region Dataset: {n_samples} samples")
+    print(f"\nTotal Multi-Region Dataset: {n_samples} samples ({len(INPUT_CHANNELS)} channels)")
 
-    # Assemble 14-channel unnormalized tensor (N, 14, 128, 128)
     raw_inputs = np.stack([stacked[ch] for ch in INPUT_CHANNELS], axis=1)
 
     # Compute Global Normalization Statistics
@@ -355,17 +377,20 @@ def build_universal_dataset(regions=None, out_npz=None, stats_path=None):
     for ch_idx, ch_name in enumerate(INPUT_CHANNELS):
         arr = raw_inputs[:, ch_idx]
         mean, std = float(arr.mean()), float(arr.std())
-        # Global geographical overrides to avoid bounding-box bias
         if ch_name == "lat":
-            mean, std = 22.0, 10.0  # Center of India [8° to 37°]
+            mean, std = 22.0, 10.0
         elif ch_name == "lon":
-            mean, std = 80.0, 10.0  # Center of India [68° to 98°]
+            mean, std = 80.0, 10.0
         elif ch_name == "elevation":
-            mean, std = 1000.0, 1500.0  # Scale relative to 1km scale
+            mean, std = 1000.0, 1500.0
         elif ch_name == "wind_speed":
             mean, std = 0.0, 10.0
         elif ch_name == "relative_humidity":
             mean, std = 50.0, 25.0
+        elif ch_name == "ndvi":
+            mean, std = 0.5, 0.25
+        elif ch_name == "built_up":
+            mean, std = 0.2, 0.25
 
         stats[f"{ch_name}_mean"] = mean
         stats[f"{ch_name}_std"] = std
@@ -376,11 +401,9 @@ def build_universal_dataset(regions=None, out_npz=None, stats_path=None):
     stats["Y_mean"] = float(stacked["Y"].mean())
     stats["Y_std"] = float(stacked["Y"].std())
 
-    # Residual target normalized
     norm_residual = (stacked["residual"] - stats["R_mean"]) / (stats["R_std"] if stats["R_std"] > 1e-6 else 1.0)
-    targets = norm_residual[:, None, :, :]  # (N, 1, 128, 128)
+    targets = norm_residual[:, None, :, :]
 
-    # Train / Val Split
     rng = np.random.default_rng(SEED)
     perm = rng.permutation(n_samples)
     n_val = max(1, int(n_samples * VAL_FRACTION))
@@ -397,16 +420,12 @@ def build_universal_dataset(regions=None, out_npz=None, stats_path=None):
     with open(stats_path, "w") as f:
         json.dump(stats, f, indent=2)
 
-    print(f"\nSuccessfully built and saved universal dataset -> {out_npz}")
+    print(f"\nSuccessfully built and saved universal 16-channel dataset -> {out_npz}")
     print(f"Stats saved -> {stats_path}")
-    print(f"Train split: {len(train_idx)} | Val split: {len(val_idx)}")
-    print(f"Input shape: {norm_inputs.shape} (14 channels)")
+    print(f"Train samples: {len(train_idx)} | Val samples: {len(val_idx)}")
     return out_npz, stats_path
 
 
-# ---------------------------------------------------------------------------
-# 5. PYTORCH DATASET LOADER
-# ---------------------------------------------------------------------------
 class UniversalWeatherDataset(Dataset):
     def __init__(self, npz_path, split="train"):
         data = np.load(npz_path)
@@ -426,9 +445,7 @@ class UniversalWeatherDataset(Dataset):
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(description="14-Channel Multi-Region Dataset Builder")
-    p.add_argument("--multi-region", action="store_true", default=True, help="Build universal multi-region dataset")
+    p = argparse.ArgumentParser()
     p.add_argument("--regions", nargs="+", default=["himalayas_kullu", "deccan_plateau", "indo_gangetic_plain", "chikmagaluru"])
     args = p.parse_args()
-
     build_universal_dataset(regions=args.regions)

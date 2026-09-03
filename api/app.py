@@ -25,6 +25,7 @@ from build_dataset import (
     compute_terrain_derivatives,
     compute_subgrid_elevation_anomaly,
     compute_orographic_wind_exposure,
+    compute_land_cover_channels,
     INPUT_CHANNELS,
     BASE_LAPSE_RATE
 )
@@ -98,13 +99,15 @@ def load_model_and_stats():
     """Loads 14-channel ResAttnUNet weights and global normalization stats."""
     global model, stats
     model_path = ROOT_DIR / "downscaler.pt"
-    stats_path = DATA_DIR / "norm_stats_14ch.json"
+    stats_path = DATA_DIR / "norm_stats_16ch.json"
+    if not stats_path.exists():
+        stats_path = DATA_DIR / "norm_stats_14ch.json"
 
     if not model_path.exists():
         raise FileNotFoundError(f"Model checkpoint not found at {model_path}. Run train_unet.py first.")
 
     ckpt = torch.load(model_path, map_location=DEVICE)
-    in_channels = ckpt.get("config", {}).get("in_channels", 14)
+    in_channels = ckpt.get("config", {}).get("in_channels", 16)
 
     if stats_path.exists():
         with open(stats_path) as f:
@@ -222,8 +225,8 @@ def fetch_live_meteorology(bbox):
 # ---------------------------------------------------------
 # 7. CORE 14-CHANNEL INFERENCE ENGINE
 # ---------------------------------------------------------
-def run_downscale_inference(dem_raw, bbox, coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd):
-    """Constructs 14-channel normalized tensor and executes ResAttnUNet prediction."""
+def run_downscale_inference(dem_raw, bbox, coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, region_name=""):
+    """Constructs 16-channel normalized tensor and executes ResAttnUNet prediction."""
     north, west, south, east = bbox
     lat_grid = np.linspace(north, south, 128, dtype=np.float32)[:, None].repeat(128, axis=1)
     lon_grid = np.linspace(west, east, 128, dtype=np.float32)[None, :].repeat(128, axis=0)
@@ -231,11 +234,13 @@ def run_downscale_inference(dem_raw, bbox, coarse_t, coarse_p, coarse_rh, coarse
     slope_mag, aspect_x, aspect_y, curvature = compute_terrain_derivatives(dem_raw)
     subgrid_dz = compute_subgrid_elevation_anomaly(dem_raw)
     orographic_wind = compute_orographic_wind_exposure(dem_raw, coarse_u, coarse_v)
+    ndvi_patch, built_up_patch = compute_land_cover_channels(dem_raw, region_name.lower())
 
     raw_channels = [
         coarse_t, coarse_p, dem_raw, lat_grid, lon_grid,
         slope_mag, aspect_x, aspect_y, curvature,
-        coarse_u, coarse_v, coarse_spd, orographic_wind, coarse_rh
+        coarse_u, coarse_v, coarse_spd, orographic_wind, coarse_rh,
+        ndvi_patch, built_up_patch
     ]
 
     # Normalize each channel using global stats
@@ -284,8 +289,8 @@ def health():
         "status": "ok",
         "device": str(DEVICE),
         "model_ready": model is not None,
-        "n_channels": 14,
-        "model_type": "ResAttnUNet_14ch"
+        "n_channels": len(INPUT_CHANNELS),
+        "model_type": "ResAttnUNet_16ch"
     }
 
 
@@ -319,7 +324,7 @@ def on_demand_downscale(req: OnDemandRequest):
         coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, weather_meta = fetch_live_meteorology(bbox)
 
         # Execute downscaling
-        out = run_downscale_inference(dem_1km, bbox, coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd)
+        out = run_downscale_inference(dem_1km, bbox, coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, region_name=req.name)
 
         # Generate local microclimate summary & sample village panchayats
         final_t = out["final_temp"]
@@ -402,7 +407,7 @@ def predict(req: DownscaleRequest):
             }
 
         # Run inference
-        out = run_downscale_inference(dem_raw, bbox, coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd)
+        out = run_downscale_inference(dem_raw, bbox, coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, region_name=region)
         final_t = out["final_temp"]
         dem_m = out["elevation"]
 

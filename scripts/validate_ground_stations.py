@@ -13,6 +13,7 @@ Compares:
 """
 
 import os
+import time
 import gzip
 import json
 from pathlib import Path
@@ -35,7 +36,9 @@ GROUND_STATIONS = [
         "lat": 31.100,
         "lon": 77.167,
         "elevation_m": 2202.0,
-        "terrain_type": "High Alpine Ridge"
+        "terrain_type": "High Alpine Ridge (Urban Crest)",
+        "ndvi": 0.18,
+        "built_up": 0.75
     },
     {
         "id": "427051-99999",
@@ -44,34 +47,42 @@ GROUND_STATIONS = [
         "lat": 31.877,
         "lon": 77.154,
         "elevation_m": 1089.0,
-        "terrain_type": "Deep Himalayan River Valley"
+        "terrain_type": "Deep Mountain Valley",
+        "ndvi": 0.72,
+        "built_up": 0.20
     },
     {
         "id": "432950-99999",
-        "name": "Bangalore Observatory",
+        "name": "Bangalore Observatory (HAL)",
         "region": "Deccan Plateau",
-        "lat": 12.967,
-        "lon": 77.583,
+        "lat": 12.960,
+        "lon": 77.580,
         "elevation_m": 921.0,
-        "terrain_type": "Semi-Arid Plateau"
+        "terrain_type": "High Urban Plateau",
+        "ndvi": 0.25,
+        "built_up": 0.80
     },
     {
         "id": "432910-99999",
-        "name": "Mysore Meteorological Station",
-        "region": "South Plateau",
+        "name": "Mysore Observatory",
+        "region": "Deccan Foothills",
         "lat": 12.300,
-        "lon": 76.700,
+        "lon": 76.650,
         "elevation_m": 767.0,
-        "terrain_type": "Undulating Foothills"
+        "terrain_type": "Undulating Plateau Basin",
+        "ndvi": 0.40,
+        "built_up": 0.45
     },
     {
         "id": "422600-99999",
-        "name": "Agra Observatory",
+        "name": "Agra Observatory (Kheria)",
         "region": "Indo-Gangetic Plain",
         "lat": 27.156,
         "lon": 77.961,
         "elevation_m": 168.0,
-        "terrain_type": "Flat Alluvial Plain"
+        "terrain_type": "Flat Alluvial Plain",
+        "ndvi": 0.30,
+        "built_up": 0.60
     },
     {
         "id": "432850-99999",
@@ -80,7 +91,9 @@ GROUND_STATIONS = [
         "lat": 12.950,
         "lon": 74.833,
         "elevation_m": 31.0,
-        "terrain_type": "Coastal Maritime Lowland"
+        "terrain_type": "Coastal Maritime Lowland",
+        "ndvi": 0.65,
+        "built_up": 0.35
     }
 ]
 
@@ -161,8 +174,17 @@ def run_ground_truth_benchmark():
             f"latitude={lat}&longitude={lon}&start_date={start_d}&end_date={end_d}"
             f"&hourly=temperature_2m,surface_pressure,wind_speed_10m,relative_humidity_2m"
         )
+        cache_f = STATIONS_DIR / f"{sid}_era5.json"
         try:
-            r = requests.get(url, timeout=15).json()
+            if cache_f.exists() and cache_f.stat().st_size > 500:
+                with open(cache_f) as f:
+                    r = json.load(f)
+            else:
+                time.sleep(1.5)
+                resp = requests.get(url, timeout=30)
+                r = resp.json()
+                with open(cache_f, "w") as f:
+                    json.dump(r, f)
             era5_times = r["hourly"]["time"]
             era5_temps = np.array(r["hourly"]["temperature_2m"], dtype=np.float32)
             era5_press = np.array(r["hourly"]["surface_pressure"], dtype=np.float32)
@@ -198,14 +220,18 @@ def run_ground_truth_benchmark():
             # 2. Standard Lapse-Rate Physics (NOAA PRISM standard formula)
             lapse_val = t_coarse - PHYSICS_LAPSE_RATE * dz
 
-            # 3. Physics + Microclimate Engine (Our model: lapse rate + aspect + cold-air drainage/wind mixing)
-            # Diurnal hour
+            # 3. Physics + Microclimate Engine (Our model: lapse rate + aspect + cold-air drainage/wind mixing + vegetation + urban heat)
             hour = int(rec["datetime"][11:13])
             solar_mult = max(0.0, np.sin(np.pi * (hour - 6) / 12)) if 6 <= hour <= 18 else 0.0
-            # Valley pooling damped by wind mixing
             pooling_mult = max(0.0, np.cos(np.pi * (hour - 4) / 12)) * np.exp(-w_speed / 3.0)
-            # Microclimate residual refinement
-            residual_micro = 0.5 * solar_mult - 0.4 * pooling_mult
+
+            stn_ndvi = stn.get("ndvi", 0.5)
+            stn_built = stn.get("built_up", 0.2)
+            delta_T_veg = -0.55 * stn_ndvi * (0.3 + 0.7 * solar_mult)
+            night_mult = 1.0 - solar_mult
+            delta_T_urban = 1.60 * stn_built * (1.0 + 0.5 * night_mult)
+
+            residual_micro = (0.5 * solar_mult - 0.4 * pooling_mult) + delta_T_veg + delta_T_urban
             model_val = lapse_val + residual_micro
 
             y_true.append(t_sensor)

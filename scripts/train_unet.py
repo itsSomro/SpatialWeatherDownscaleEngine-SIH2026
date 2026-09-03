@@ -25,8 +25,8 @@ from build_dataset import UniversalWeatherDataset, INPUT_CHANNELS
 # Paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
-TRAIN_NPZ = DATA_DIR / "training_dataset_multiregion.npz"
-NORM_STATS_PATH = DATA_DIR / "norm_stats_14ch.json"
+TRAIN_NPZ = DATA_DIR / "training_dataset_multiregion_16ch.npz"
+NORM_STATS_PATH = DATA_DIR / "norm_stats_16ch.json"
 CHECKPOINT_OUT = PROJECT_ROOT / "downscaler.pt"
 LOSS_CURVE_OUT = PROJECT_ROOT / "Images" / "training_loss_curve.png"
 

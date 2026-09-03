@@ -52,12 +52,12 @@ def load_model():
 
 def build_test_dataset_if_needed(region, stats):
     """Builds normalized test dataset for the unseen region if not present."""
-    test_npz = DATA_DIR / region / f"test_dataset_{region}_14ch.npz"
+    test_npz = DATA_DIR / region / f"test_dataset_{region}_16ch.npz"
     if test_npz.exists():
         data = np.load(test_npz)
         return data["inputs"], data["targets_celsius"], data["dem_raw"], data["coarse_temp_raw"]
 
-    print(f"Building 14-channel test dataset for unseen region: '{region}'...")
+    print(f"Building 16-channel test dataset for unseen region: '{region}'...")
     raw = build_region_samples(region)
     if not raw or "Y" not in raw:
         raise FileNotFoundError(f"Failed to load data for region {region}. Ensure data/{region}/ has DEM and ERA5 npz.")

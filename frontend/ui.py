@@ -17,7 +17,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 from ai_advisor import ask_ai_chat
 
 # ---------------------------------------------------------
-# PAGE SETUP & PREMIUM DARK AESTHETICS
+# PAGE SETUP 
 # ---------------------------------------------------------
 st.set_page_config(
     layout="wide",

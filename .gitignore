@@ -1,12 +1,13 @@
-data/
-*.nc
-*.tif
-*.npy
-*.npz
-downscaler.pt
-Images/
+.env
 
-.idea/
 __pycache__/
 *.pyc
 .venv/
+venv/
+
+*.pt
+outputs/
+*.npy
+
+.DS_Store
+.vscode/

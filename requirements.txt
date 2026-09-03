@@ -1,7 +1,5 @@
-# Deep Learning Engine
 torch
 
-# Data & GIS Processing Stack
 numpy
 scipy
 matplotlib
@@ -11,7 +9,10 @@ rasterio
 cdsapi
 requests
 
-# Web Application Backend & Frontend
 fastapi
 uvicorn
 streamlit
+
+huggingface_hub
+python-dotenv
+google-genai

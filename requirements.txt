@@ -1,0 +1,17 @@
+# Deep Learning Engine
+torch
+
+# Data & GIS Processing Stack
+numpy
+scipy
+matplotlib
+xarray
+netCDF4
+rasterio
+cdsapi
+requests
+
+# Web Application Backend & Frontend
+fastapi
+uvicorn
+streamlit

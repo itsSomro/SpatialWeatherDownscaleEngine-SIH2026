@@ -227,7 +227,7 @@ with col_badge:
     if is_custom:
         st.markdown('<span class="badge-custom">⚡ On-Demand Live Region</span>', unsafe_allow_html=True)
     else:
-        st.markdown('<span class="badge-live">🔴 14-Channel Real-Time</span>', unsafe_allow_html=True)
+        st.markdown('<span class="badge-live">🔴 16-Channel Real-Time</span>', unsafe_allow_html=True)
 
 metrics = data.get("metrics", {})
 live_meta = data.get("live_meta", {})

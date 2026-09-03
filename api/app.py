@@ -7,6 +7,7 @@ import torch
 import numpy as np
 import requests
 from scipy.ndimage import zoom
+from typing import Dict, List, Optional, Any
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -18,8 +19,10 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = ROOT_DIR / "scripts"
 DATA_DIR = ROOT_DIR / "data"
 IMAGES_DIR = ROOT_DIR / "Images"
+sys.path.insert(0, str(ROOT_DIR))
 sys.path.insert(0, str(SCRIPTS_DIR))
 
+from ai_agent.agent import get_assistant_reply
 from train_unet import DownscaleUNet
 from build_dataset import (
     compute_terrain_derivatives,
@@ -136,6 +139,22 @@ class OnDemandRequest(BaseModel):
     name: str = Field(..., description="Location name, e.g. 'Shimla' or 'Darjeeling'")
     latitude: float = Field(..., description="Latitude coordinate")
     longitude: float = Field(..., description="Longitude coordinate")
+
+
+class AgentChatRequest(BaseModel):
+    query: str = Field(..., description="User question or instruction for the AI agent")
+    thread_id: Optional[str] = Field(default="default", description="Conversation thread session id")
+    region: Optional[str] = Field(default="kodagu", description="Target region name or key")
+    telemetry: Optional[Dict[str, Any]] = Field(default=None, description="Current downscaled microclimate telemetry")
+
+
+class AgentChatResponse(BaseModel):
+    status: str = "success"
+    reply: str
+    thread_id: str
+    tools_used: List[str]
+    timestamp: str
+
 
 
 # ---------------------------------------------------------
@@ -528,3 +547,47 @@ def get_ground_station_benchmark():
         raise HTTPException(status_code=404, detail="Ground station benchmark not found. Run validate_ground_stations.py first.")
     with open(json_path) as f:
         return json.load(f)
+
+
+@app.post("/api/v1/agent/chat", response_model=AgentChatResponse)
+def agent_chat(req: AgentChatRequest):
+    """
+    AI Agro-Meteorological & Microclimate Data Agent endpoint.
+    Executes tool inspection, queries live 1km telemetry, and generates grounded advisories.
+    """
+    try:
+        telemetry = req.telemetry or {}
+        if not telemetry and req.region:
+            reg_info = REGIONS.get(req.region.lower(), REGIONS.get("kodagu", {}))
+            telemetry = {
+                "region_name": reg_info.get("name", req.region),
+                "timestamp_label": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+                "metrics": {
+                    "downscaled_min": 16.0,
+                    "downscaled_max": 28.0,
+                    "downscaled_mean": 23.5,
+                    "thermal_delta_c": 12.0,
+                    "mean_humidity": 65.0,
+                    "mean_wind_speed": 10.0,
+                    "mean_et0_mm": 3.5
+                },
+                "panchayats": []
+            }
+
+        res = get_assistant_reply(
+            user_input=req.query,
+            telemetry=telemetry,
+            thread_id=req.thread_id,
+            return_dict=True
+        )
+
+        return AgentChatResponse(
+            status="success",
+            reply=res["reply"],
+            thread_id=res["thread_id"],
+            tools_used=res["tools_used"],
+            timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat()
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

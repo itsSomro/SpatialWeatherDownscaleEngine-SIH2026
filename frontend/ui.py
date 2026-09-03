@@ -17,6 +17,8 @@ SCRIPTS_DIR = ROOT_DIR / "scripts"
 sys.path.insert(0, str(ROOT_DIR))
 sys.path.insert(0, str(SCRIPTS_DIR))
 from ai_advisor import ask_ai_chat
+from ai_agent.agent import get_assistant_reply
+
 
  
 # PAGE SETUP 
@@ -556,47 +558,153 @@ with tab_ground_stations:
 
 
  
-# TAB 4: AI AGRO-CLIMATIC ADVISORY
- 
+# ---------------------------------------------------------
+# TAB 4: GRAMVAYU AI DATA AGENT (CONVERSATIONAL & TOOLS)
+# ---------------------------------------------------------
 with tab_ai:
-    st.subheader("AI Microclimate Advisor (Context-Aware LLM)")
-    st.markdown("Provides real-time, actionable agricultural and disaster advisories based on the 14-channel microclimate predictions.")
+    st.subheader("🤖 GramVayu AI Data Agent (Physics-Guided Conversational Advisor)")
+    st.caption("Multi-turn agro-meteorological agent equipped with real-time tool inspection across 1km downscaled microclimate telemetry.")
 
-    prompt_q = st.text_input(
-        "Ask AI Advisor about local crop risk, microclimate suitability, or disaster warnings:",
-        value="What are the primary microclimate risks in this region and how should farmers adjust irrigation and harvest?"
-    )
+    elev_r = metrics.get("elevation_range_m", [500, 1500])
+    current_reg_name = data.get("region_name", "Selected Region")
 
-    if st.button("Generate Agro-Climatic Advisory", type="primary"):
-        with st.spinner("AI Advisor analyzing 1km microclimate gradients..."):
-            elev_r = metrics.get("elevation_range_m", [500, 1500])
-            context = {
-                "region_name": data.get("region_name", "Current Region"),
-                "mode": mode_val if "mode_val" in locals() else "live",
-                "timestamp_label": datetime.datetime.now().strftime("%Y-%m-%d %H:%M UTC"),
-                "metrics": {
-                    "downscaled_min": metrics.get("min_temp", 15.0),
-                    "downscaled_max": metrics.get("max_temp", 28.0),
-                    "downscaled_mean": metrics.get("mean_temp", 22.0),
-                    "coarse_mean": live_meta.get("mean_temp_c", 22.0),
-                    "valley_ridge_delta": metrics.get("thermal_delta_c", 6.0),
-                    "max_cooling_delta": -4.0,
-                    "max_heating_delta": 3.0,
-                    "elevation_min": elev_r[0],
-                    "elevation_max": elev_r[1],
-                    "mean_humidity": metrics.get("mean_humidity", 65.0),
-                    "mean_wind_speed": metrics.get("mean_wind_speed", 10.0),
-                    "mean_et0_mm": metrics.get("mean_et0_mm", 3.5)
-                },
-                "panchayats": data.get("panchayats", [])
+    # Telemetry Context Strip
+    st.markdown(f"""
+    <div style="background: #1e2530; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; border: 1px solid #374151; display: flex; flex-wrap: wrap; gap: 15px; font-size: 13px;">
+        <div>📍 <b>Region:</b> {current_reg_name}</div>
+        <div>🌡️ <b>Range:</b> {metrics.get('min_temp', 0):.1f}°C to {metrics.get('max_temp', 0):.1f}°C (Δ {metrics.get('thermal_delta_c', 0):.1f}°C)</div>
+        <div>⛰️ <b>Elevation:</b> {elev_r[0]:.0f}m – {elev_r[1]:.0f}m</div>
+        <div>💧 <b>ET₀ Demand:</b> {metrics.get('mean_et0_mm', 0):.1f} mm/day</div>
+        <div>🛠️ <b>Tools:</b> <span style="color: #10b981;">Active (5 Telemetry Tools)</span></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Initialize Session State Messages & Thread ID
+    thread_key = f"agent_thread_{selected_region_key}"
+    if "agent_thread_id" not in st.session_state or st.session_state.get("active_region") != selected_region_key:
+        st.session_state.agent_thread_id = thread_key
+        st.session_state.active_region = selected_region_key
+        st.session_state.agent_messages = [
+            {
+                "role": "assistant",
+                "content": f"👋 Hello! I am **GramVayu AI**, your microclimate and agro-meteorological advisor for **{current_reg_name}**.\n\nI have inspected the 1km downscaled physics telemetry: local relief spans **{elev_r[0]:.0f}m to {elev_r[1]:.0f}m** with a **{metrics.get('thermal_delta_c', 0):.1f}°C thermal gradient**.\n\nAsk me about frost risk in valley basins, specific panchayat forecasts, crop suitability, irrigation demands, or request an official administrative circular!",
+                "tools": []
             }
-            try:
-                advisory_text = ask_ai_chat(prompt_q, context)
-                st.markdown(f"""
-                <div class="search-card">
-                    <h4 style="color: #3b82f6; margin-top: 0;">📋 Microclimate Advisory Report</h4>
-                    {advisory_text}
-                </div>
-                """, unsafe_allow_html=True)
-            except Exception as e:
-                st.info(f"AI Advisor generated standard rule-based advisory for {data.get('region_name')}:\n\n- **Inversion Risk:** High cold pooling observed in lower valley wards below {int(elev_range[0] + 50)}m.\n- **Wind Factor:** Ridge zones subject to higher evapotranspiration under {live_meta.get('mean_wind_speed_kmh', 10.0):.1f} km/h winds.\n- **Recommended Action:** Delay night irrigation in valley hollows to prevent frost root shock.")
+        ]
+
+    # Quick Action Chips
+    st.markdown("**Quick Inquiries & Telemetry Tools:**")
+    q_col1, q_col2, q_col3, q_col4, q_col5 = st.columns([1.1, 1.1, 1.1, 1.1, 0.8])
+
+    selected_quick_prompt = None
+    with q_col1:
+        if st.button("❄️ Coldest Panchayat & Frost", use_container_width=True):
+            selected_quick_prompt = "Which panchayat is the coldest, and what are the valley cold-air pooling and frost risks?"
+    with q_col2:
+        if st.button("💧 Highest Water Demand", use_container_width=True):
+            selected_quick_prompt = "Which panchayat has the highest irrigation water demand (L/ha) and what is the recommended schedule?"
+    with q_col3:
+        if st.button("🏛️ Official Circular", use_container_width=True):
+            selected_quick_prompt = "Draft an official Gram Panchayat advisory directive based on current microclimate relief."
+    with q_col4:
+        if st.button("🚜 Spraying Window", use_container_width=True):
+            selected_quick_prompt = "What is the precision agrochemical spraying window considering current topographic winds?"
+    with q_col5:
+        if st.button("🧹 Clear Chat", use_container_width=True):
+            st.session_state.agent_messages = []
+            st.rerun()
+
+    # Render Chat History
+    chat_container = st.container()
+    with chat_container:
+        for msg in st.session_state.agent_messages:
+            with st.chat_message(msg["role"]):
+                if msg.get("tools"):
+                    tool_tags = " ".join([f"`🛠️ {t}`" for t in msg["tools"]])
+                    st.caption(f"Executed data inspection tools: {tool_tags}")
+                st.markdown(msg["content"])
+
+    # Helper function to query backend or fallback to local agent
+    def query_agent(prompt_text: str):
+        # Build telemetry payload
+        context_payload = {
+            "region_name": current_reg_name,
+            "mode": mode_val if "mode_val" in locals() else "live",
+            "timestamp_label": datetime.datetime.now().strftime("%Y-%m-%d %H:%M UTC"),
+            "metrics": {
+                "downscaled_min": metrics.get("min_temp", 15.0),
+                "downscaled_max": metrics.get("max_temp", 28.0),
+                "downscaled_mean": metrics.get("mean_temp", 22.0),
+                "coarse_mean": live_meta.get("mean_temp_c", 22.0),
+                "valley_ridge_delta": metrics.get("thermal_delta_c", 6.0),
+                "max_cooling_delta": -4.0,
+                "max_heating_delta": 3.0,
+                "elevation_min": elev_r[0],
+                "elevation_max": elev_r[1],
+                "mean_humidity": metrics.get("mean_humidity", 65.0),
+                "mean_wind_speed": metrics.get("mean_wind_speed", 10.0),
+                "mean_et0_mm": metrics.get("mean_et0_mm", 3.5)
+            },
+            "panchayats": data.get("panchayats", [])
+        }
+
+        # Try FastAPI backend endpoint first
+        reply_text = None
+        tools_used = []
+        try:
+            resp = requests.post(
+                f"{API_URL}/api/v1/agent/chat",
+                json={
+                    "query": prompt_text,
+                    "thread_id": st.session_state.agent_thread_id,
+                    "region": selected_region_key,
+                    "telemetry": context_payload
+                },
+                timeout=25
+            )
+            if resp.status_code == 200:
+                resp_data = resp.json()
+                reply_text = resp_data.get("reply")
+                tools_used = resp_data.get("tools_used", [])
+        except Exception:
+            pass
+
+        # If backend endpoint is unavailable or failed, fallback to direct in-process execution
+        if not reply_text:
+            direct_res = get_assistant_reply(
+                user_input=prompt_text,
+                telemetry=context_payload,
+                thread_id=st.session_state.agent_thread_id,
+                return_dict=True
+            )
+            reply_text = direct_res["reply"]
+            tools_used = direct_res["tools_used"]
+
+        return reply_text, tools_used
+
+    # Handle Chat Input
+    user_prompt = st.chat_input("Ask GramVayu AI about local crop risks, specific panchayats, or disaster directives...")
+    active_prompt = selected_quick_prompt or user_prompt
+
+    if active_prompt:
+        # Add user message to state
+        st.session_state.agent_messages.append({"role": "user", "content": active_prompt, "tools": []})
+        with st.chat_message("user"):
+            st.markdown(active_prompt)
+
+        # Generate agent response with spinner
+        with st.chat_message("assistant"):
+            with st.spinner("GramVayu AI analyzing microclimate telemetry & executing tools..."):
+                reply_out, tools_out = query_agent(active_prompt)
+                if tools_out:
+                    tool_tags = " ".join([f"`🛠️ {t}`" for t in tools_out])
+                    st.caption(f"Executed data inspection tools: {tool_tags}")
+                st.markdown(reply_out)
+
+        # Save assistant message to state
+        st.session_state.agent_messages.append({
+            "role": "assistant",
+            "content": reply_out,
+            "tools": tools_out
+        })
+        st.rerun()

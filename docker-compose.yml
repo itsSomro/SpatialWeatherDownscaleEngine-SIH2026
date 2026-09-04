@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  downscaler-app:
+    build: .
+    container_name: spatial_weather_downscaler
+    ports:
+      - "8000:8000"
+      - "8501:8501"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

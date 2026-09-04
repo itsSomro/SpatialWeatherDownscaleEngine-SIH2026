@@ -1,9 +1,9 @@
 """
-Evaluate Universal 14-Channel ResAttnUNet on an UNSEEN Region (SIH 2026)
+Evaluate Universal 16-Channel ResAttnUNet on an UNSEEN Region (SIH 2026)
 ------------------------------------------------------------------------
 Evaluates cross-region, out-of-distribution generalization on completely
 unseen geographic areas (e.g., Kodagu or custom searched region) using
-the 14-channel Physics + Residual Attention U-Net.
+the 16-channel Physics + Residual Attention U-Net.
 
 Compares THREE operational methods against high-resolution ground truth:
   1. Naive upsampling       -- Bilinear interpolation from 10km NWP without elevation.
@@ -37,7 +37,7 @@ def load_model():
     """Loads model checkpoint and normalization statistics."""
     ckpt = torch.load(CHECKPOINT, map_location=DEVICE)
     cfg = ckpt["config"]
-    in_channels = cfg.get("in_channels", 14)
+    in_channels = cfg.get("in_channels", 16)
     model = DownscaleUNet(
         in_channels=in_channels,
         out_channels=cfg.get("out_channels", 1),

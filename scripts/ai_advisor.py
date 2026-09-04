@@ -174,7 +174,71 @@ def _generate_offline_advisory(telemetry: Dict[str, Any], prompt: str) -> str:
 3. **Hydration:** Ensure ad-libitum access to clean, shaded cool drinking water with electrolyte supplementation.
 """
 
-    # 8. General / Default comprehensive response
+    # 8. Greetings & Conversational
+    elif any(prompt_lower.strip().startswith(w) for w in ["hi", "hello", "hey", "greetings", "namaste", "good morning", "good afternoon", "good evening"]):
+        return f"""### 👋 Welcome to GramVayu AI!
+I am your **Physics-Guided Agro-Meteorological & Microclimate Intelligence Agent** for **{region_name}**.
+
+#### 💡 How I can assist you:
+- **❄️ Cold & Frost Risks:** Ask *"Which panchayat has the coldest temperature?"* or *"Analyze valley cold-air pooling."*
+- **💧 Irrigation Planning:** Ask *"What is the irrigation demand in liters per hectare?"* (Calculated via FAO-56 Penman-Monteith).
+- **🏛️ Administrative Directives:** Ask *"Draft an official Gram Panchayat advisory circular."*
+- **🚜 Agro-Chemical Spraying:** Ask *"Is now a safe window to spray pesticides?"*
+- **🍄 Crop Pathology:** Ask *"Check fungal blight and pest risks."*
+
+*Telemetry Status:* Currently tracking **{region_name}** with temperatures ranging from **{down_min:.1f}°C** to **{down_max:.1f}°C** across {elev_min:.0f}m–{elev_max:.0f}m elevation.
+"""
+
+    # 9. Agent Identity & About
+    elif any(w in prompt_lower for w in ["who are you", "what are you", "your name", "introduce yourself"]):
+        return f"""### 🤖 About GramVayu AI
+I am **GramVayu AI**, an agro-meteorological advisory agent developed for the **Smart India Hackathon (SIH 2026)**.
+
+I bridge the gap between coarse 10km global numerical weather models (ERA5) and 1km hyper-local village realities by analyzing:
+1. **16 Physical & Topographic Channels:** High-resolution DEM topography, slope, aspect vectors, curvature, orographic wind forcing, moisture, vegetation canopy (NDVI), and built-up land cover.
+2. **Physics-Guided Residual U-Net:** Combining moist adiabatic lapse-rate physics with deep attention networks.
+3. **Panchayat Grounding:** Translating microclimate gradients into actionable agricultural advisories for rural farmers and disaster management teams.
+"""
+
+    # 10. Capabilities & Help
+    elif any(w in prompt_lower for w in ["what can you do", "help", "commands", "features", "capabilities", "how to use"]):
+        return f"""### 🛠️ GramVayu AI Capabilities & Tools
+You can query me about:
+1. **Extrema Detection:**
+   - *"Which panchayat is coldest?"* $\\rightarrow$ Detects nocturnal cold-air drainage zones.
+   - *"Which panchayat has the highest water demand?"* $\\rightarrow$ Queries FAO-56 reference evapotranspiration ($ET_0$).
+2. **Crop & Agronomic Impact:**
+   - Impact on coffee (Arabica/Robusta blossoms), cardamom, black pepper, arecanut, tea, and paddy.
+3. **Operational Protocols:**
+   - **Spraying Windows:** Wind drift limits and volatilization risks.
+   - **Fungal Pathology:** Wallin & Mills criteria for late blight and blast spores.
+   - **Livestock Comfort:** THI heat stress thresholds for dairy cattle.
+4. **Official Circulars:**
+   - Automatic generation of GKMS-format panchayat circulars.
+"""
+
+    # 11. Physics & Model Architecture
+    elif any(w in prompt_lower for w in ["downscaling", "physics", "how does it work", "architecture", "unet", "u-net", "model"]):
+        return f"""### 🔬 Universal Downscaling Physics Architecture
+Our engine downscales 10km ERA5 data to a 1km resolution using a two-tier physics-guided approach:
+
+1. **Tier 1 — Environmental Physics Baseline:**
+   $$\\Delta Z = Z_{{1km}} - Z_{{10km}}$$
+   $$\\Gamma_{{eff}} = \\Gamma_{{dry}} \\times \\left(1 - 0.35 \\times \\frac{{RH}}{{100}}\\right)$$
+   $$T_{{physics}} = T_{{coarse}} - \\Gamma_{{eff}} \\times \\Delta Z$$
+
+2. **Tier 2 — 16-Channel Residual Attention U-Net:**
+   Predicts the local microclimate residual $R$ governed by:
+   - Terrain slope magnitude, downhill unit vectors (solar aspect $N/S$ and $E/W$)
+   - Topographic curvature $\\nabla^2 z$ (drainage basins vs exposed ridges)
+   - Orographic wind-slope dot product $(\\vec{v} \\cdot \\nabla z)$
+   - Normalized Difference Vegetation Index (NDVI) and built-up land cover
+
+3. **Final 1km Field:**
+   $$T_{{final}} = T_{{physics}} + R$$
+"""
+
+    # 12. General / Default comprehensive response
     else:
         return f"""### 🌾 GRAMVAYU AI MICROCLIMATE INTELLIGENCE
 **Analysis for:** {region_name} ({timestamp})  
@@ -192,7 +256,7 @@ def _generate_offline_advisory(telemetry: Dict[str, Any], prompt: str) -> str:
 #### 🔍 Key Takeaway for Judges & Administrators:
 Global forecasts predict an average temperature of **{coarse_mean:.1f}°C**, completely blinding local authorities to the fact that farmers in the river valley are shivering at **{down_min:.1f}°C** while hillside plantations are baking at **{down_max:.1f}°C**.
 
-By predicting microclimate residuals on top of subgrid lapse-rate physics, our 9-channel engine empowers Gram Panchayats with actionable, ward-level climate resilience.
+By predicting microclimate residuals on top of subgrid lapse-rate physics, our engine empowers Gram Panchayats with actionable, ward-level climate resilience.
 
 *Feel free to ask specific questions about crop impact, frost warnings, or irrigation directives!*
 """

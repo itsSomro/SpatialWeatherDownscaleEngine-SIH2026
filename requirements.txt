@@ -16,3 +16,6 @@ streamlit
 huggingface_hub
 python-dotenv
 google-genai
+plotly
+folium
+streamlit-folium

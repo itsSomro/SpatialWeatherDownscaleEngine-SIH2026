@@ -91,7 +91,8 @@ LOCATION_STOP_WORDS = {
     "this", "here", "there", "what", "whats", "which", "how", "show", "tell",
     "details", "info", "information", "report", "advisory", "bulletin",
     "advice", "status", "check", "value", "values", "level", "levels",
-    "formation", "version", "dicators", "dex", "teraction", "telligence", "puts", "crease"
+    "the", "a", "an", "is", "it", "our", "my", "some", "any", "good", "bad", "mean",
+    "average", "will", "can", "farmers", "people", "like", "overview"
 }
 
 

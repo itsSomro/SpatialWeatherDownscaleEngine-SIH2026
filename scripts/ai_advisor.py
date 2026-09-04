@@ -277,11 +277,134 @@ Our engine downscales 10km ERA5 data to a 1km resolution using a two-tier physic
    $$T_{{final}} = T_{{physics}} + R$$
 """
 
-    # 12. General / Default comprehensive response
+    # 12. Rain & Precipitation Forecast
+    elif any(w in prompt_lower for w in ["rain", "rainfall", "precipitation", "shower", "monsoon", "wet"]):
+        precip_val = m.get("mean_precip_mm", 0.0)
+        rh_val = m.get("mean_humidity", 65.0)
+        has_rain = precip_val > 1.0 or rh_val > 88.0
+        return f"""### 🌧️ PRECIPITATION & OROGRAPHIC RAINFALL TELEMETRY
+**Region:** {region_name} | **Mean 1km Precipitation:** **{precip_val:.1f} mm** | **Relative Humidity:** **{rh_val:.0f}%**
+
+---
+
+#### 1. Real-Time Precipitation Dynamics:
+- **Rain Status:** {'🌧️ **ACTIVE / ELEVATED RAIN DETECTED**' if has_rain else '☀️ **DRY / NO SIGNIFICANT RAINFALL EXPECTED**'}
+- **Orographic Forcing:** Windward slopes induce adiabatic forced ascent of moist air, creating localized condensation spikes up to **{precip_val * 1.6:.1f} mm** on windward ridges, while leeward rain-shadow valleys remain dry.
+- **Surface Leaf Wetness:** {'High moisture accumulation — delay harvesting and chemical sprays.' if has_rain else 'Dry canopy conditions — safe for fieldwork and harvesting.'}
+
+#### 2. Farm Action Plan:
+1. {'Check valley drainage swales to prevent root-zone waterlogging in cardamom and coffee.' if has_rain else 'Soil moisture is depleting steadily; maintain scheduled drip irrigation.'}
+2. {'Cover harvested coffee cherries on drying yards immediately.' if has_rain else 'Optimal conditions for drying coffee beans and pepper berries.'}
+"""
+
+    # 13. General Weather Overview / Today's Weather
+    elif any(w in prompt_lower for w in ["weather today", "current weather", "temperature today", "how hot", "how cold", "weather overview", "forecast today", "summary"]):
+        return f"""### ⛅ GENERAL 1KM MICROCLIMATE OVERVIEW
+**Region:** **{region_name}** | **Time:** **{timestamp}**
+
+---
+
+#### 🌡️ Thermal Microclimate Distribution:
+- **Regional Mean Temperature:** **{down_mean:.1f}°C**
+- **Coldest Valley Microclimate:** **{down_min:.1f}°C** (Deep drainage hollows)
+- **Warmest Ridge Microclimate:** **{down_max:.1f}°C** (Sunward-facing slopes)
+- **Local Microclimate Spread:** **{relief_delta:.1f}°C** across topography
+
+#### 💨 Atmospheric State:
+- **Relative Humidity:** **{m.get('mean_humidity', 65.0):.0f}%**
+- **Surface Wind Speed:** **{m.get('mean_wind_speed', 8.0):.1f} km/h**
+- **Daily Evapotranspiration ($ET_0$):** **{m.get('mean_et0_mm', 3.4):.1f} mm/day** (Water Need: **{int(m.get('mean_et0_mm', 3.4) * 10000):,} L/ha**)
+
+*Takeaway:* A single district forecast says **{coarse_mean:.1f}°C**, but actual village temperatures vary by over **{relief_delta:.1f}°C**!
+"""
+
+    # 14. Sowing & Crop Planting Advice
+    elif any(w in prompt_lower for w in ["sow", "sowing", "plant", "planting", "seed", "cultivation"]):
+        is_favorable = 18.0 <= down_mean <= 28.0 and m.get("mean_humidity", 65.0) >= 50.0
+        return f"""### 🌱 SOWING & PLANTING WINDOW INTELLIGENCE
+**Target Region:** {region_name} | **Mean Temperature:** **{down_mean:.1f}°C**
+
+---
+
+#### 1. Agronomic Sowing Conditions:
+- **Sowing Feasibility:** {'🟢 **FAVORABLE SOWING WINDOW**' if is_favorable else '⚠️ **SUB-OPTIMAL TEMPERATURE / STRESS ZONE**'}
+- **Soil Germination Temperature:** Seedlings require warm topsoil (20°C - 26°C). Sun-facing slopes are currently at **{down_max:.1f}°C**, providing optimal soil temperature for rapid germination.
+- **Moisture Cushion:** Surface relative humidity of **{m.get('mean_humidity', 65.0):.0f}%** supports seed imbibition without fungal rot.
+
+#### 2. Recommended Village Protocols:
+1. **Valley Sowing:** Avoid early sowing in deep concave valleys ({down_min:.1f}°C) where night chill delays germination.
+2. **Pre-Soaking:** Pre-soak seeds in microbial biostimulant (Trichoderma / Pseudomonas) before direct drill sowing.
+"""
+
+    # 15. Wind & Storm Dynamics
+    elif any(w in prompt_lower for w in ["wind speed", "windy", "wind direction", "gale", "gust", "wind"]):
+        wind_spd = m.get("mean_wind_speed", 8.0)
+        is_gusty = wind_spd > 18.0
+        return f"""### 💨 TOPOGRAPHIC WIND & CANOPY DYNAMICS
+**Region:** {region_name} | **Mean Wind Speed:** **{wind_spd:.1f} km/h**
+
+---
+
+#### 1. Orographic Wind Tunneling:
+- **Wind Classification:** {'⚠️ **GUSTY / ELEVATED (Ridge Tunneling)**' if is_gusty else '🟢 **LIGHT TO MODERATE (Stable)**'}
+- **Terrain Effect:** Narrow mountain cols and saddles accelerate horizontal air mass movement via the Venturi effect.
+- **Canopy Drag:** Exposed pepper vines on ridge crests experience mechanical stress; valley floors remain sheltered (< 4 km/h).
+
+#### 2. Field Instructions:
+1. **Spraying Protocol:** {'Suspend pesticide application; drift hazard exceeds safety thresholds.' if wind_spd > 12.0 else 'Safe for foliar spraying until wind speeds pick up at midday.'}
+2. **Propping & Staking:** Stake young banana plants and nursery saplings along exposed ridge trajectories.
+"""
+
+    # 16. Why 1km Resolution vs 10km / IMD Comparison
+    elif any(w in prompt_lower for w in ["why 1km", "resolution", "difference between", "vs 10km", "vs 30km", "imd comparison"]):
+        return f"""### 🔬 WHY 1KM MICROCLIMATE RESOLUTION MATTERS
+**The Spatial Gap in Indian Agriculture:**
+
+---
+
+#### 1. The Coarse Model Limitation (IMD / ERA5 at 30km–100km):
+- A single 30 km x 30 km grid cell covers **900 square kilometers**.
+- It averages valleys (600m), plateaus (900m), and peaks (1,900m) into a single flat number (e.g. **{coarse_mean:.1f}°C**).
+- Result: Farmers in the valley freeze; hillside farmers dry out; and government advisories are completely inaccurate.
+
+#### 2. The 1km Downscaling Advantage (Our Engine):
+- Divides each district into **1 km x 1 km Gram Panchayat cells** (100 hectares each).
+- Fuses **16 physical channels** (slope, solar aspect, curvature, windward exposure, NDVI vegetation canopy).
+- Uncovers an actual **{relief_delta:.1f}°C thermal difference** across the same district:
+  - Valley Basin: **{down_min:.1f}°C** (Cold-air pooling)
+  - Sunward Ridge: **{down_max:.1f}°C** (Solar exposure)
+"""
+
+    # 17. Simple ET0 / Water Requirement Explanation
+    elif any(w in prompt_lower for w in ["what is et0", "what is evapotranspiration", "explain et0", "how do you calculate water"]):
+        et0_val = m.get("mean_et0_mm", 3.4)
+        liters_ha = int(et0_val * 10000)
+        return f"""### 💧 EXPLAINING FAO-56 EVAPOTRANSPIRATION (ET_0)
+**In Simple Terms for Farmers & Administrators:**
+
+---
+
+#### 1. What is ET_0?
+- **Evapotranspiration ($ET_0$)** is the total volume of water lost to the atmosphere through:
+  1. **Evaporation:** Direct moisture lost from topsoil by solar heat and wind.
+  2. **Transpiration:** Water drawn from the roots and exhaled through crop leaves.
+
+#### 2. Today's Numbers for {region_name}:
+- **Atmospheric Demand:** **{et0_val:.1f} mm per day**
+- **The Liters/Hectare Formula:**
+  - 1 mm of $ET_0$ = 10,000 Liters of water per Hectare
+  - Total Field Demand = {et0_val:.1f} x 10,000 = **{liters_ha:,} Liters / Hectare**
+
+#### 3. Why It Saves Water:
+Without 1km downscaling, farmers either over-water (leaching fertilizer) or under-water (stressing crops). With localized $ET_0$, Gram Panchayats schedule irrigation with milliliter precision.
+"""
+
+    # 18. General / Default comprehensive response
     else:
         return f"""### 🌾 GRAMVAYU AI MICROCLIMATE INTELLIGENCE
 **Analysis for:** {region_name} ({timestamp})  
 **Operational Mode:** {'🔴 Live Real-Time Global Stream' if mode == 'live' else '📅 Historical Diurnal Archive'}
+
 
 ---
 

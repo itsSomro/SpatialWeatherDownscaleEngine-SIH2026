@@ -13,6 +13,7 @@ Compares:
 """
 
 import os
+import sys
 import time
 import gzip
 import json
@@ -20,6 +21,9 @@ from pathlib import Path
 import requests
 import numpy as np
 import matplotlib.pyplot as plt
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -384,6 +388,7 @@ def plot_ground_station_benchmark(results):
     axes[1, 1].axhline(0, color="black", linewidth=0.8)
     axes[1, 1].set_ylabel("MAE Improvement over Coarse NWP (%)")
     axes[1, 1].set_title("Operational Error Reduction vs Coarse NWP", fontweight="bold")
+    axes[1, 1].set_xticks(range(len(names)))
     axes[1, 1].set_xticklabels(names, rotation=15, fontsize=9)
     for bar, imp in zip(bars, improvements):
         axes[1, 1].text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1, f"+{imp:.1f}%" if imp > 0 else f"{imp:.1f}%",

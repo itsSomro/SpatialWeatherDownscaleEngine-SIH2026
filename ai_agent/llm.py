@@ -20,7 +20,7 @@ try:
 except ImportError:
     _HF_SDK_AVAILABLE = False
 
-DEFAULT_HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+DEFAULT_HF_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
 
 def _get_token() -> Optional[str]:
@@ -33,7 +33,14 @@ def _get_token() -> Optional[str]:
 
 def _get_model() -> str:
     model = os.environ.get("HF_MODEL")
-    return model.strip() if model and model.strip() else DEFAULT_HF_MODEL
+    if not model or not model.strip():
+        return DEFAULT_HF_MODEL
+    m = model.strip()
+    if m.lower() in ["qwen", "qwen3", "qwen2.5", "qwen-7b"]:
+        return "Qwen/Qwen2.5-7B-Instruct"
+    if m.lower() in ["qwen-72b", "qwen2.5-72b", "qwen3-72b"]:
+        return "Qwen/Qwen2.5-72B-Instruct"
+    return m
 
 
 def _get_gemini_key() -> Optional[str]:
@@ -141,7 +148,10 @@ def chat(messages: List[Dict[str, str]], telemetry: Optional[Dict[str, Any]] = N
             break
 
     try:
-        from ai_advisor import _generate_offline_advisory
+        try:
+            from scripts.ai_advisor import _generate_offline_advisory
+        except ImportError:
+            from ai_advisor import _generate_offline_advisory
         safe_telemetry = telemetry or {}
         offline_reply = _generate_offline_advisory(safe_telemetry, last_user_msg)
         if api_error_notice:

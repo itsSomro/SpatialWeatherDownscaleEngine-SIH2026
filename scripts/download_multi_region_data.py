@@ -236,8 +236,9 @@ def download_on_demand_region(lat, lon, region_name, box_size_deg=0.9, fetch_era
     Optimized: Skips redundant 1-week ERA5 download during inference, and reuses cached DEM.
     """
     clean_id = "".join(c if c.isalnum() else "_" for c in region_name.lower().strip())
-    region_dir = DATA_DIR / clean_id
-    region_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = DATA_DIR / "cache" / clean_id
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    region_dir = cache_dir
 
     half = box_size_deg / 2.0
     north = lat + half

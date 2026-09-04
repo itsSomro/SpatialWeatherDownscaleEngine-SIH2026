@@ -35,13 +35,23 @@ def get_safe_gp_index(max_count: int) -> int:
     return idx
 
 
+def render_html(html_str: str):
+    """Renders HTML safely using st.html (Streamlit 1.33+) or fallback st.markdown without markdown code-block triggers."""
+    if hasattr(st, "html"):
+        st.html(html_str)
+    else:
+        cleaned = "\n".join(line.strip() for line in html_str.splitlines() if line.strip())
+        st.markdown(cleaned, unsafe_allow_html=True)
+
+
+
 # =============================================================================
 # PAGE SETUP & STYLES
 # =============================================================================
 
 st.set_page_config(
     layout="wide",
-    page_title="GRAMVAYU // Hyperlocal Atmospheric Downscaling Engine",
+    page_title="GRAMATMO // Hyperlocal Atmospheric Downscaling Engine",
     page_icon="☵"
 )
 
@@ -440,6 +450,126 @@ st.markdown("""
         padding: 16px;
         margin-bottom: 14px;
     }
+
+    /* Cartographic Map Index & Symbology */
+    .map-index-container {
+        background-color: var(--surface);
+        border: 1px solid var(--border-hairline);
+        border-radius: 4px;
+        padding: 16px 18px;
+        margin-top: 14px;
+        margin-bottom: 20px;
+    }
+    .map-index-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 14px;
+        border-bottom: 1px solid var(--border-hairline);
+        padding-bottom: 10px;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .map-index-title {
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--text-primary);
+    }
+    .map-index-badge {
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--accent);
+        background: rgba(255, 74, 28, 0.08);
+        border: 1px solid rgba(255, 74, 28, 0.25);
+        padding: 2px 8px;
+        border-radius: 2px;
+    }
+    .gradient-bar-wrapper {
+        margin-bottom: 14px;
+    }
+    .gradient-bar-track {
+        height: 12px;
+        border-radius: 2px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        margin-bottom: 6px;
+        width: 100%;
+    }
+    .gradient-labels {
+        display: flex;
+        justify-content: space-between;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--text-secondary);
+    }
+    .gradient-labels b {
+        color: var(--text-primary);
+    }
+    .gradient-caption {
+        font-family: var(--sans);
+        font-size: 12px;
+        line-height: 1.45;
+        color: var(--text-secondary);
+        margin-top: 6px;
+        padding-left: 2px;
+    }
+    .symbology-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-top: 14px;
+        padding-top: 14px;
+        border-top: 1px solid var(--border-hairline);
+    }
+    @media (max-width: 1024px) {
+        .symbology-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+    @media (max-width: 640px) {
+        .symbology-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+    .symbology-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        background: var(--surface-subtle);
+        border: 1px solid var(--border-hairline);
+        border-radius: 3px;
+        padding: 10px 12px;
+    }
+    .symbology-icon {
+        width: 24px;
+        height: 24px;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        border-radius: 3px;
+    }
+    .symbology-details {
+        flex: 1;
+    }
+    .symbology-name {
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--text-primary);
+        margin-bottom: 3px;
+    }
+    .symbology-desc {
+        font-family: var(--sans);
+        font-size: 11px;
+        line-height: 1.4;
+        color: var(--text-secondary);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -520,7 +650,7 @@ with st.sidebar:
         ENGINE DISPATCH // 1KM GRID
       </div>
       <div style="font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 900; color: #f2efe9; letter-spacing: -0.02em; margin-top: 2px;">
-        GRAMVAYU <span style="font-size: 14px; font-weight: 400; color: #8c96a5; font-family: 'Plus Jakarta Sans', sans-serif;">(ग्रामवायु)</span>
+        GRAMATMO <span style="font-size: 14px; font-weight: 400; color: #8c96a5; font-family: 'Plus Jakarta Sans', sans-serif;">(ग्रामवायु)</span>
       </div>
       <div style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #8c96a5; margin-top: 4px;">
         Atmospheric Physics Engine
@@ -860,7 +990,7 @@ with st.sidebar:
                     with st.spinner(f"Locating '{sb_search_val}' in 30km bounds..."):
                         found_v = resolve_and_add_panchayat(sb_search_val, active_lat, active_lon, active_reg_title, selected_region_key, data)
                     if found_v:
-                        st.toast(f"Located {found_v['name']} ({found_v['distance_km']} km away)", icon="✓")
+                        st.toast(f"Located {found_v['name']} ({found_v['distance_km']} km away)")
                         st.rerun()
                     else:
                         st.warning(f"No village matching '{sb_search_val}' found within 30km bounds.")
@@ -988,7 +1118,7 @@ with col_main:
         <div class="masthead-frame">
           <div class="masthead-tag">SYS.ID // IMD-GKMS METEOROLOGICAL DISPATCH // 1 KM² PRECISION GRID</div>
           <div class="masthead-name">
-            GRAMVAYU <span class="masthead-vernacular">(ग्रामवायु)</span>
+            GRAMATMO <span class="masthead-vernacular">(ग्रामवायु)</span>
           </div>
           <div class="masthead-desc">
             Universal physics-guided atmospheric downscale architecture. Generates 1km² contiguous prognostic fields across complex topographic relief.
@@ -1391,6 +1521,96 @@ with col_main:
         # returned_objects=[] ensures NO page refreshes or script reruns on map pan/zoom/click!
         st_folium(m_reg, width="100%", height=470, key="main_reg_folium", returned_objects=[])
 
+        # Cartographic Index & Symbology Key
+        gradient_css_map = {
+            "turbo": "linear-gradient(to right, #30123b, #4662d8, #28bbec, #38e3a2, #a4fc3c, #fae23a, #f97c1d, #c92403, #7a0403)",
+            "coolwarm": "linear-gradient(to right, #3b4cc0, #6788ee, #9bc4f5, #c9d8ef, #edd1c2, #f7a889, #e26952, #b40426)",
+            "plasma": "linear-gradient(to right, #0d0887, #46039f, #7201a8, #9c179e, #bd3786, #d8576b, #ed7953, #fb9f3a, #fdca26, #f0f921)",
+            "viridis": "linear-gradient(to right, #440154, #482475, #414487, #35608d, #2a788e, #21918d, #22a884, #44bf70, #7ad151, #bddf26, #fde725)",
+            "YlGnBu": "linear-gradient(to right, #ffffd9, #edf8b1, #c7e9b4, #7fcdbb, #41b6c4, #1d91c0, #225ea8, #253494, #081d58)"
+        }
+        chosen_grad_css = gradient_css_map.get(reg_cmap_choice, gradient_css_map["turbo"])
+
+        grad_meta = {
+            "temperature": {
+                "low": "MIN (COLD-AIR POOLING)",
+                "mid": "REGIONAL MEAN",
+                "high": "MAX (THERMAL BELT / INSOLATION)",
+                "desc": f"Continuous 1km thermal downscaling field from {v_min_display:.1f}°C to {v_max_display:.1f}°C. Cool tones illustrate high-altitude ridge cooling and nocturnal valley cold-air pooling; warm tones denote solar-heated windward faces and lowland valleys."
+            },
+            "humidity": {
+                "low": "MIN (DRY BOUNDARY AIR)",
+                "mid": "REGIONAL MEAN",
+                "high": "MAX (FOG / HIGH BLIGHT HAZARD)",
+                "desc": f"Continuous relative humidity distribution from {v_min_display:.0f}% to {v_max_display:.0f}%. High moisture concentrations signify stagnant valley air pockets, persistent dew formation, and heightened fungal pathogen sporulation."
+            },
+            "wind": {
+                "low": "MIN (SHELTERED BASIN)",
+                "mid": "REGIONAL MEAN",
+                "high": "MAX (RIDGE TOPOGRAPHIC SHEAR)",
+                "desc": f"Continuous 10m surface wind speed from {v_min_display:.1f} to {v_max_display:.1f} km/h. Low velocities highlight valley basins suitable for chemical spraying; high velocities highlight ridge venturi wind shear."
+            },
+            "precip": {
+                "low": "MIN (LEAPING RAIN SHADOW)",
+                "mid": "REGIONAL MEAN",
+                "high": "MAX (OROGRAPHIC CONVECTIVE PEAK)",
+                "desc": f"Continuous 24h precipitation field from {v_min_display:.1f} to {v_max_display:.1f} mm. Demonstrates topographic precipitation enhancements along mountain windward slopes versus sheltered rain shadows."
+            },
+            "et0": {
+                "low": "MIN (LOW TRANSPIRATION)",
+                "mid": "REGIONAL MEAN",
+                "high": "MAX (EVAPORATIVE WATER STRESS)",
+                "desc": f"Continuous Penman-Monteith reference evapotranspiration from {v_min_display:.1f} to {v_max_display:.1f} mm/day. Peak zones indicate unshaded, windy slopes with maximum daily crop transpirational loss."
+            }
+        }
+        current_gmeta = grad_meta.get(reg_var_key, grad_meta["temperature"])
+
+        render_html(f"""<div class="map-index-container">
+<div class="map-index-header">
+<div class="map-index-title">CARTOGRAPHIC INDEX & SYMBOLOGY KEY // 1 KM² PHYSICAL DOWNSCALING</div>
+<div class="map-index-badge">VARIABLE: {reg_var_key.upper()} [{chosen_unit}] &nbsp;·&nbsp; SHADER: {reg_cmap_choice.upper()}</div>
+</div>
+<div class="gradient-bar-wrapper">
+<div class="gradient-bar-track" style="background: {chosen_grad_css};"></div>
+<div class="gradient-labels">
+<span><b>{v_min_display:.1f} {chosen_unit}</b> &nbsp;—&nbsp; {current_gmeta['low']}</span>
+<span><b>{v_mean:.1f} {chosen_unit}</b> &nbsp;—&nbsp; {current_gmeta['mid']}</span>
+<span><b>{v_max_display:.1f} {chosen_unit}</b> &nbsp;—&nbsp; {current_gmeta['high']}</span>
+</div>
+<div class="gradient-caption"><b>Color Gradient Dynamics:</b> {current_gmeta['desc']}</div>
+</div>
+<div class="symbology-grid">
+<div class="symbology-item">
+<div class="symbology-icon" style="background: #ef4444; color: #ffffff; border: 1px solid #f87171; box-shadow: 0 0 6px rgba(239,68,68,0.4);">★</div>
+<div class="symbology-details">
+<div class="symbology-name">Active Focus Station</div>
+<div class="symbology-desc">Currently focused Gram Panchayat ({curr_p.get('panchayat_name')}). All telemetry readouts, WhatsApp alerts, and crop directives reflect this coordinate.</div>
+</div>
+</div>
+<div class="symbology-item">
+<div class="symbology-icon" style="background: #11141a; border: 1px solid rgba(255,255,255,0.12);"><div style="width: 10px; height: 10px; border-radius: 50%; background: #f97316; border: 2px solid #ffffff;"></div></div>
+<div class="symbology-details">
+<div class="symbology-name">Gram Panchayat Station</div>
+<div class="symbology-desc">Recorded village localities ({len(panchayats)} across domain). Hover to preview microclimate or click any button in the ledger to switch focus.</div>
+</div>
+</div>
+<div class="symbology-item">
+<div class="symbology-icon" style="background: rgba(2, 132, 199, 0.12); border: 1.5px dashed #0284c7; color: #38bdf8;">⬚</div>
+<div class="symbology-details">
+<div class="symbology-name">30×30 km Domain Bounds</div>
+<div class="symbology-desc">Spatial boundary of the 1km² ResAttnUNet physical downscaling grid synthesized across local mountain topography.</div>
+</div>
+</div>
+<div class="symbology-item">
+<div class="symbology-icon" style="background: #171b22; border: 1px solid rgba(255,255,255,0.12); color: #f59e0b; font-weight: bold;">▲</div>
+<div class="symbology-details">
+<div class="symbology-name">Topographic Relief</div>
+<div class="symbology-desc">Underlying SRTM terrain contours and elevation relief that physically dictate cold-air drainage channels and thermal belts.</div>
+</div>
+</div>
+</div>
+</div>""")
+
     # =========================================================================
     # 5. CROP-SPECIFIC AGRONOMIC FIELD DIRECTIVES & SCIENTIFIC RULE ENGINE
     # =========================================================================
@@ -1436,50 +1656,45 @@ with col_main:
 
     d_canopy, d_irrig, d_nutr, d_prot = get_crop_agronomic_directives(curr_p, w_s, adv)
 
-    st.markdown(f"""
-    <div style="height: 20px;"></div>
-    <div class="section-tagline">SECTION // 05 · AGRONOMIC DISPATCH PROTOCOLS</div>
-    <div class="section-headline">OPERATIONAL FIELD DIRECTIVES // {curr_p.get('panchayat_name').upper()}</div>
-    <div class="section-description">Elevation-adjusted crop operations based on 1km downscaled microclimate ({curr_p.get('elevation_m')}m ASL) and local crop systems ({curr_p.get('major_crops', 'Local Agriculture')}).</div>
-
-    <div class="field-manual-grid">
-      <div class="field-card">
-        <div class="field-card-tag">DIRECTIVE 01 // CANOPY ARCHITECTURE</div>
-        <div class="field-card-title">Canopy & Stage Management</div>
-        <div class="field-card-body">{d_canopy}</div>
-      </div>
-      <div class="field-card">
-        <div class="field-card-tag">DIRECTIVE 02 // HYDROLOGICAL BALANCE</div>
-        <div class="field-card-title">Precision Root-Zone Irrigation</div>
-        <div class="field-card-body">{d_irrig}</div>
-      </div>
-      <div class="field-card">
-        <div class="field-card-tag">DIRECTIVE 03 // PHYTOSANITARY TIMING</div>
-        <div class="field-card-title">Nutrient & Foliar Spray Window</div>
-        <div class="field-card-body">{d_nutr}</div>
-      </div>
-      <div class="field-card">
-        <div class="field-card-tag">DIRECTIVE 04 // HARVEST & BIOLOGICAL ASSETS</div>
-        <div class="field-card-title">Livestock & Post-Harvest Shelter</div>
-        <div class="field-card-body">{d_prot}</div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+    render_html(f"""<div style="height: 20px;"></div>
+<div class="section-tagline">SECTION // 05 · AGRONOMIC DISPATCH PROTOCOLS</div>
+<div class="section-headline">OPERATIONAL FIELD DIRECTIVES // {curr_p.get('panchayat_name').upper()}</div>
+<div class="section-description">Elevation-adjusted crop operations based on 1km downscaled microclimate ({curr_p.get('elevation_m')}m ASL) and local crop systems ({curr_p.get('major_crops', 'Local Agriculture')}).</div>
+<div class="field-manual-grid">
+  <div class="field-card">
+    <div class="field-card-tag">DIRECTIVE 01 // CANOPY ARCHITECTURE</div>
+    <div class="field-card-title">Canopy & Stage Management</div>
+    <div class="field-card-body">{d_canopy}</div>
+  </div>
+  <div class="field-card">
+    <div class="field-card-tag">DIRECTIVE 02 // HYDROLOGICAL BALANCE</div>
+    <div class="field-card-title">Precision Root-Zone Irrigation</div>
+    <div class="field-card-body">{d_irrig}</div>
+  </div>
+  <div class="field-card">
+    <div class="field-card-tag">DIRECTIVE 03 // PHYTOSANITARY TIMING</div>
+    <div class="field-card-title">Nutrient & Foliar Spray Window</div>
+    <div class="field-card-body">{d_nutr}</div>
+  </div>
+  <div class="field-card">
+    <div class="field-card-tag">DIRECTIVE 04 // HARVEST & BIOLOGICAL ASSETS</div>
+    <div class="field-card-title">Livestock & Post-Harvest Shelter</div>
+    <div class="field-card-body">{d_prot}</div>
+  </div>
+</div>""")
 
     # 6. WhatsApp Broadcast Box
-    st.markdown(f"""
-    <div class="bulletin-box">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-        <span style="font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: var(--text-primary); text-transform: uppercase;">
-          TELEMETRY DISPATCH BULLETIN // GKMS PANCHAYAT BROADCAST
-        </span>
-        <span style="font-family: var(--mono); font-size: 10px; color: var(--accent);">STATION: {curr_p.get('panchayat_name').upper()}</span>
-      </div>
-      <div style="font-family: var(--sans); font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">
-        Formatted dispatch ledger formatted for one-click copy into local Gram Panchayat administration or farmer channels:
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+    render_html(f"""<div class="bulletin-box">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+    <span style="font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: var(--text-primary); text-transform: uppercase;">
+      TELEMETRY DISPATCH BULLETIN // GKMS PANCHAYAT BROADCAST
+    </span>
+    <span style="font-family: var(--mono); font-size: 10px; color: var(--accent);">STATION: {curr_p.get('panchayat_name').upper()}</span>
+  </div>
+  <div style="font-family: var(--sans); font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">
+    Formatted dispatch ledger formatted for one-click copy into local Gram Panchayat administration or farmer channels:
+  </div>
+</div>""")
 
     wa_text = (
         f"📢 *IMD GKMS Weather & Agro Alert for {curr_p.get('panchayat_name')}*\n"
@@ -1496,7 +1711,7 @@ with col_main:
         f"• Spraying Window: {spray_b}\n"
         f"• Priority Action: {curr_p.get('primary_action')}\n"
         f"─────────────────\n"
-        f"Shared via GramVayu 1km Microclimate Downscaler"
+        f"Shared via GRAMATMO 1km Microclimate Downscaler"
     )
     st.text_area("Copy text below to paste into Panchayat or Farmer WhatsApp groups:", value=wa_text, height=120, label_visibility="collapsed")
 
@@ -1718,22 +1933,20 @@ with col_main:
 
         st.plotly_chart(fig_diurnal, use_container_width=True)
 
-        st.markdown("""
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px;">
-          <div style="background: var(--surface); border: 1px solid var(--border-hairline); border-left: 2px solid #38bdf8; border-radius: 3px; padding: 12px 14px;">
-            <div style="font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; color: #38bdf8; text-transform: uppercase; margin-bottom: 4px;">PHASE 01 // DAWN DRAINAGE (04:00 - 06:30)</div>
-            <div style="font-family: var(--sans); font-size: 11.5px; color: var(--text-secondary); line-height: 1.45;">Minimum temperatures drop to coldest basin levels. Valley cold-air drainage pooling reaches peak intensity.</div>
-          </div>
-          <div style="background: var(--surface); border: 1px solid var(--border-hairline); border-left: 2px solid #10b981; border-radius: 3px; padding: 12px 14px;">
-            <div style="font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; color: #10b981; text-transform: uppercase; margin-bottom: 4px;">PHASE 02 // SPRAY DISPATCH (07:00 - 09:30)</div>
-            <div style="font-family: var(--sans); font-size: 11.5px; color: var(--text-secondary); line-height: 1.45;">Calm morning surface air (winds under 10 km/h) and optimal relative humidity allow agrochemicals to settle without drift.</div>
-          </div>
-          <div style="background: var(--surface); border: 1px solid var(--border-hairline); border-left: 2px solid var(--accent-amber); border-radius: 3px; padding: 12px 14px;">
-            <div style="font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; color: var(--accent-amber); text-transform: uppercase; margin-bottom: 4px;">PHASE 03 // PEAK EVAPORATION (12:00 - 15:00)</div>
-            <div style="font-family: var(--sans); font-size: 11.5px; color: var(--text-secondary); line-height: 1.45;">Solar insolation peaks. Elevated reference ET₀ causes peak transpirational stress across exposed hill slopes.</div>
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
+        render_html("""<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px;">
+  <div style="background: var(--surface); border: 1px solid var(--border-hairline); border-left: 2px solid #38bdf8; border-radius: 3px; padding: 12px 14px;">
+    <div style="font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; color: #38bdf8; text-transform: uppercase; margin-bottom: 4px;">PHASE 01 // DAWN DRAINAGE (04:00 - 06:30)</div>
+    <div style="font-family: var(--sans); font-size: 11.5px; color: var(--text-secondary); line-height: 1.45;">Minimum temperatures drop to coldest basin levels. Valley cold-air drainage pooling reaches peak intensity.</div>
+  </div>
+  <div style="background: var(--surface); border: 1px solid var(--border-hairline); border-left: 2px solid #10b981; border-radius: 3px; padding: 12px 14px;">
+    <div style="font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; color: #10b981; text-transform: uppercase; margin-bottom: 4px;">PHASE 02 // SPRAY DISPATCH (07:00 - 09:30)</div>
+    <div style="font-family: var(--sans); font-size: 11.5px; color: var(--text-secondary); line-height: 1.45;">Calm morning surface air (winds under 10 km/h) and optimal relative humidity allow agrochemicals to settle without drift.</div>
+  </div>
+  <div style="background: var(--surface); border: 1px solid var(--border-hairline); border-left: 2px solid var(--accent-amber); border-radius: 3px; padding: 12px 14px;">
+    <div style="font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; color: var(--accent-amber); text-transform: uppercase; margin-bottom: 4px;">PHASE 03 // PEAK EVAPORATION (12:00 - 15:00)</div>
+    <div style="font-family: var(--sans); font-size: 11.5px; color: var(--text-secondary); line-height: 1.45;">Solar insolation peaks. Elevated reference ET₀ causes peak transpirational stress across exposed hill slopes.</div>
+  </div>
+</div>""")
 
     # TAB 4: GROUND SENSOR VALIDATION (REAL NOAA ISD THERMOMETERS)
     with tab_ground_stations:
@@ -1888,7 +2101,7 @@ with col_main:
 
 
 # =============================================================================
-# EXPANDABLE RIGHT SIDEBAR: GRAMVAYU AI ASSISTANT PANEL
+# EXPANDABLE RIGHT SIDEBAR: GRAMATMO AI ASSISTANT PANEL
 # =============================================================================
 
 if col_right_slidebar is not None:

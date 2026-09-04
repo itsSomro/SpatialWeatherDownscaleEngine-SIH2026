@@ -41,67 +41,404 @@ def get_safe_gp_index(max_count: int) -> int:
 
 st.set_page_config(
     layout="wide",
-    page_title="GramVayu: Gram Panchayat Early Warning System | SIH 2026",
-    page_icon="🌾"
+    page_title="GRAMVAYU // Hyperlocal Atmospheric Downscaling Engine",
+    page_icon="☵"
 )
 
 st.markdown("""
 <style>
-    .metric-card {
-        background: linear-gradient(135deg, #1e2530 0%, #151a23 100%);
-        border-radius: 12px;
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Syne:wght@700;800;900&display=swap');
+
+    :root {
+        --canvas: #090b0e;
+        --surface: #11141a;
+        --surface-subtle: #171b22;
+        --surface-raised: #1d222b;
+        --border-hairline: rgba(255, 255, 255, 0.08);
+        --border-strong: rgba(255, 255, 255, 0.16);
+        --text-primary: #f2efe9;
+        --text-secondary: #8c96a5;
+        --text-muted: #566171;
+        --accent: #ff4a1c; /* Signal Vermilion */
+        --accent-amber: #f59e0b; /* Precision Amber */
+        --accent-emerald: #10b981; /* Metric Green */
+        --mono: 'JetBrains Mono', monospace;
+        --sans: 'Plus Jakarta Sans', sans-serif;
+        --display: 'Syne', sans-serif;
+    }
+
+    /* Core typography reset */
+    html, body, [class*="css"], .stApp {
+        font-family: var(--sans) !important;
+        background-color: var(--canvas) !important;
+        color: var(--text-primary) !important;
+    }
+
+    /* Strict Font Ban enforcement */
+    h1, h2, h3, .brand-title, .station-title {
+        font-family: var(--display) !important;
+        letter-spacing: -0.025em !important;
+        font-weight: 800 !important;
+    }
+
+    code, pre, .mono-text, [data-testid="stMetricValue"], [data-testid="stMetricLabel"], [data-testid="stMetricDelta"] {
+        font-family: var(--mono) !important;
+    }
+
+    /* Streamlit UI elements override */
+    .stTextInput>div>div>input, .stSelectbox>div>div, .stDateInput>div>div>input {
+        background-color: var(--surface) !important;
+        border: 1px solid var(--border-hairline) !important;
+        border-radius: 4px !important;
+        color: var(--text-primary) !important;
+        font-family: var(--mono) !important;
+        font-size: 13px !important;
+    }
+    .stTextInput>div>div>input:focus, .stSelectbox>div>div:focus-within {
+        border-color: var(--accent) !important;
+        box-shadow: none !important;
+    }
+
+    /* Custom Precision Buttons */
+    .stButton>button {
+        background-color: var(--surface-subtle) !important;
+        border: 1px solid var(--border-hairline) !important;
+        color: var(--text-primary) !important;
+        border-radius: 4px !important;
+        font-family: var(--mono) !important;
+        font-size: 11.5px !important;
+        letter-spacing: 0.05em !important;
+        text-transform: uppercase !important;
+        padding: 6px 14px !important;
+        transition: all 0.15s ease !important;
+    }
+    .stButton>button:hover {
+        background-color: var(--surface-raised) !important;
+        border-color: var(--border-strong) !important;
+        color: #ffffff !important;
+    }
+    .stButton>button[kind="primary"], .stButton>button:focus {
+        background-color: var(--accent) !important;
+        border-color: var(--accent) !important;
+        color: #ffffff !important;
+        font-weight: 700 !important;
+    }
+
+    /* Sidebar container styling */
+    [data-testid="stSidebar"] {
+        background-color: #0c0f14 !important;
+        border-right: 1px solid var(--border-hairline) !important;
+    }
+
+    /* Scientific Masthead */
+    .masthead-frame {
+        background-color: var(--surface);
+        border: 1px solid var(--border-hairline);
+        border-left: 3px solid var(--accent);
+        border-radius: 4px;
+        padding: 22px 28px;
+        margin-bottom: 20px;
+    }
+    .masthead-tag {
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin-bottom: 6px;
+    }
+    .masthead-name {
+        font-family: var(--display);
+        font-size: 36px;
+        font-weight: 900;
+        letter-spacing: -0.03em;
+        color: var(--text-primary);
+        line-height: 1.1;
+        margin: 0;
+    }
+    .masthead-vernacular {
+        font-family: var(--sans);
+        font-weight: 400;
+        font-size: 20px;
+        color: var(--text-secondary);
+        margin-left: 10px;
+    }
+    .masthead-desc {
+        font-family: var(--sans);
+        font-size: 13.5px;
+        color: var(--text-secondary);
+        margin-top: 6px;
+        line-height: 1.5;
+    }
+
+    /* Station Dossier Header */
+    .station-dossier {
+        background-color: var(--surface);
+        border: 1px solid var(--border-hairline);
+        border-radius: 4px;
+        padding: 20px 24px;
+        margin-bottom: 16px;
+    }
+    .station-overline {
+        font-family: var(--mono);
+        font-size: 9.5px;
+        letter-spacing: 0.16em;
+        color: var(--accent-amber);
+        text-transform: uppercase;
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+    .station-h1 {
+        font-family: var(--display);
+        font-size: 28px;
+        font-weight: 800;
+        color: var(--text-primary);
+        letter-spacing: -0.02em;
+        margin: 0 0 10px 0;
+    }
+    .station-meta-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--text-secondary);
+    }
+    .station-meta-item b {
+        color: var(--text-primary);
+        font-weight: 600;
+    }
+
+    /* Operational Matrix */
+    .matrix-container {
+        background-color: var(--surface);
+        border: 1px solid var(--border-hairline);
+        border-radius: 4px;
+        margin-bottom: 18px;
+        overflow: hidden;
+    }
+    .matrix-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border-hairline);
+        font-size: 12.5px;
+    }
+    .matrix-row:last-child {
+        border-bottom: none;
+    }
+    .matrix-code {
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        width: 90px;
+        flex-shrink: 0;
+    }
+    .matrix-label {
+        font-family: var(--sans);
+        font-weight: 600;
+        color: var(--text-primary);
+        flex: 1;
+    }
+    .matrix-reading {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--text-secondary);
+        margin: 0 16px;
+    }
+    .matrix-status {
+        font-family: var(--mono);
+        font-size: 9.5px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        padding: 3px 8px;
+        border-radius: 2px;
+        text-transform: uppercase;
+    }
+    .status-safe {
+        background-color: rgba(16, 185, 129, 0.12);
+        color: #34d399;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .status-warn {
+        background-color: rgba(245, 158, 11, 0.12);
+        color: #fbbf24;
+        border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+    .status-crit {
+        background-color: rgba(239, 68, 68, 0.15);
+        color: #f87171;
+        border: 1px solid rgba(239, 68, 68, 0.35);
+    }
+
+    /* Telemetry Instrument Strip */
+    .telemetry-strip {
+        background-color: var(--surface);
+        border: 1px solid var(--border-hairline);
+        border-radius: 4px;
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        margin-bottom: 20px;
+    }
+    .telemetry-cell {
+        padding: 16px 18px;
+        border-right: 1px solid var(--border-hairline);
+    }
+    .telemetry-cell:last-child {
+        border-right: none;
+    }
+    .telemetry-tag {
+        font-family: var(--mono);
+        font-size: 9px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin-bottom: 6px;
+    }
+    .telemetry-val {
+        font-family: var(--mono);
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--text-primary);
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+    }
+    .telemetry-sub {
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--text-secondary);
+        margin-top: 4px;
+    }
+
+    /* Tabs styling override */
+    .stTabs [data-baseweb="tab-list"] {
+        background-color: var(--surface) !important;
+        border: 1px solid var(--border-hairline) !important;
+        border-radius: 4px !important;
+        padding: 4px !important;
+        gap: 4px !important;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: transparent !important;
+        border: none !important;
+        color: var(--text-secondary) !important;
+        font-family: var(--mono) !important;
+        font-size: 11.5px !important;
+        letter-spacing: 0.02em !important;
+        border-radius: 3px !important;
+        padding: 8px 14px !important;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: var(--surface-raised) !important;
+        color: var(--text-primary) !important;
+        border-bottom: 2px solid var(--accent) !important;
+        font-weight: 700 !important;
+    }
+
+    /* Field Manual Directives Grid */
+    .field-manual-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-bottom: 20px;
+    }
+    @media (max-width: 1024px) {
+        .field-manual-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+    .field-card {
+        background-color: var(--surface);
+        border: 1px solid var(--border-hairline);
+        border-radius: 4px;
         padding: 16px;
-        border-left: 5px solid #3b82f6;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+        display: flex;
+        flex-direction: column;
+    }
+    .field-card-tag {
+        font-family: var(--mono);
+        font-size: 9px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin-bottom: 8px;
+    }
+    .field-card-title {
+        font-family: var(--sans);
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 8px;
+        letter-spacing: -0.01em;
+    }
+    .field-card-body {
+        font-family: var(--sans);
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--text-secondary);
+        flex: 1;
+    }
+
+    /* Terminal Console for Right Slidebar */
+    .terminal-header {
+        background-color: var(--surface-raised);
+        border: 1px solid var(--border-hairline);
+        border-left: 3px solid var(--accent);
+        border-radius: 4px;
+        padding: 14px 16px;
         margin-bottom: 12px;
     }
-    .badge-live {
-        background-color: #ef4444;
-        color: white;
-        padding: 4px 10px;
-        border-radius: 12px;
+    .terminal-title {
+        font-family: var(--mono);
+        font-size: 13px;
         font-weight: 700;
-        font-size: 12px;
-        display: inline-block;
+        color: var(--text-primary);
+        letter-spacing: 0.05em;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     }
-    .badge-channel {
-        background-color: #10b981;
-        color: white;
-        padding: 4px 10px;
-        border-radius: 12px;
-        font-weight: 700;
-        font-size: 12px;
-        display: inline-block;
+    .terminal-subtitle {
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--text-muted);
+        margin-top: 4px;
     }
-    .badge-custom {
-        background-color: #8b5cf6;
-        color: white;
-        padding: 4px 10px;
-        border-radius: 12px;
-        font-weight: 700;
-        font-size: 12px;
-        display: inline-block;
+
+    /* Section Taglines */
+    .section-tagline {
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin-bottom: 4px;
     }
-    .search-card {
-        background: #1e2530;
-        border-radius: 10px;
-        padding: 14px;
-        border: 1px solid #374151;
-        margin-bottom: 15px;
+    .section-headline {
+        font-family: var(--display);
+        font-size: 20px;
+        font-weight: 800;
+        color: var(--text-primary);
+        letter-spacing: -0.02em;
+        margin-bottom: 6px;
     }
-    .ai-chat-card {
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        border-radius: 14px;
+    .section-description {
+        font-family: var(--sans);
+        font-size: 12.5px;
+        color: var(--text-secondary);
+        margin-bottom: 16px;
+    }
+
+    /* WhatsApp Bulletin Card */
+    .bulletin-box {
+        background-color: var(--surface);
+        border: 1px solid var(--border-hairline);
+        border-radius: 4px;
         padding: 16px;
-        border: 1px solid #3b82f6;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-    }
-    .map-container-card {
-        background: #1e2530;
-        border-radius: 14px;
-        padding: 14px;
-        border: 1px solid #374151;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        margin-bottom: 14px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -177,30 +514,31 @@ if "show_ai_right_panel" not in st.session_state:
 # =============================================================================
 
 with st.sidebar:
-    st.image("https://img.icons8.com/clouds/200/sun.png", width=80)
     st.markdown("""
-    <div style="margin-top: -12px; margin-bottom: 10px;">
-      <h2 style="margin: 0; font-size: 22px; font-weight: 800; color: #38bdf8;">🌾 GramVayu</h2>
-      <div style="font-size: 11px; color: #94a3b8; font-weight: 600;">Gram Panchayat Weather & Early Warning</div>
-      <div style="margin-top: 5px; display: flex; gap: 5px;">
-        <span class="badge-channel" style="font-size: 10px; padding: 2px 6px;">16 Channels</span>
-        <span class="badge-live" style="font-size: 10px; padding: 2px 6px;">1km Microclimate</span>
+    <div style="padding: 14px 2px 14px 2px; border-bottom: 1px solid rgba(255,255,255,0.08); margin-bottom: 16px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.16em; color: #ff4a1c; text-transform: uppercase; font-weight: 700;">
+        ENGINE DISPATCH // 1KM GRID
+      </div>
+      <div style="font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 900; color: #f2efe9; letter-spacing: -0.02em; margin-top: 2px;">
+        GRAMVAYU <span style="font-size: 14px; font-weight: 400; color: #8c96a5; font-family: 'Plus Jakarta Sans', sans-serif;">(ग्रामवायु)</span>
+      </div>
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #8c96a5; margin-top: 4px;">
+        Atmospheric Physics Engine
       </div>
     </div>
     """, unsafe_allow_html=True)
-    st.markdown("---")
 
     input_source = st.radio(
-        "Navigation Mode",
-        ["🌍 Preset Anchor Regions", "🔍 Drop Any Custom Region (Search)"],
+        "Domain Selection",
+        ["Preset Calibrated Domains", "Custom Domain Search (All-India)"],
         index=0,
-        help="Select a calibrated anchor zone or search any district/tehsil across India."
+        help="Select a calibrated anchor domain or query any coordinates/town in India."
     )
 
     mode_val = "live"
     archive_date = "2023-05-15"
 
-    if input_source == "🌍 Preset Anchor Regions":
+    if "Preset" in input_source:
         region_options = {k: v["name"] for k, v in metadata.get("regions", {}).items()}
         selected_region_key = st.selectbox(
             "Select Anchor Region",
@@ -264,7 +602,7 @@ with st.sidebar:
             st.session_state.selected_gp_idx = 0
             st.session_state.pop("sb_gp_idx", None)
 
-    elif input_source == "🔍 Drop Any Custom Region (Search)":
+    else:
         st.markdown("**Search Any Region Across India**")
         search_query = st.text_input("Type city, district, or mountain area:", value="Darjeeling")
 
@@ -490,13 +828,16 @@ p_water_l = int(p_et0 * 10000)
 
 # Complete Left Sidebar GP Selector
 with st.sidebar:
-    st.markdown("---")
-    st.markdown("### 🏛️ Gram Panchayat Location")
+    st.markdown("""
+    <div style="font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; color: var(--accent); text-transform: uppercase; margin: 16px 0 6px 0; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 14px;">
+        STATION FOCUS // LOCALITY DISPATCH
+    </div>
+    """, unsafe_allow_html=True)
     if panchayats:
         gp_names = [p["panchayat_name"] for p in panchayats]
         valid_idx = get_safe_gp_index(len(gp_names))
 
-        sb_search_val = st.text_input("🔍 Filter Villages:", placeholder="Type to filter...", key="sb_gp_filter_query")
+        sb_search_val = st.text_input("Filter Station / Village:", placeholder="Filter by locality name...", key="sb_gp_filter_query")
         if sb_search_val and sb_search_val.strip():
             filtered_idxs = [i for i, name in enumerate(gp_names) if sb_search_val.strip().lower() in name.lower()]
             if filtered_idxs:
@@ -506,23 +847,23 @@ with st.sidebar:
 
                 f_current = valid_idx if valid_idx in filtered_idxs else filtered_idxs[0]
                 st.selectbox(
-                    f"Matching Villages ({len(filtered_idxs)}):",
+                    f"Matching Stations ({len(filtered_idxs)}):",
                     filtered_idxs,
-                    format_func=lambda i: f"🏛️ {gp_names[i]} ({panchayats[i].get('elevation_m')}m)",
+                    format_func=lambda i: f"{gp_names[i].upper()} [{panchayats[i].get('elevation_m')}M]",
                     index=filtered_idxs.index(f_current),
                     key="sb_filtered_gp_idx",
                     on_change=_sync_filtered
                 )
             else:
-                st.caption(f"'{sb_search_val}' not in preloaded list.")
-                if st.button(f"🔎 Locate '{sb_search_val}' in 30km Area", key="btn_sb_locate_gp", use_container_width=True, type="primary"):
-                    with st.spinner(f"Locating '{sb_search_val}' in 30km area..."):
+                st.caption(f"'{sb_search_val}' not in preloaded registry.")
+                if st.button(f"LOCATE '{sb_search_val.upper()}' (30KM BOUNDS)", key="btn_sb_locate_gp", use_container_width=True, type="primary"):
+                    with st.spinner(f"Locating '{sb_search_val}' in 30km bounds..."):
                         found_v = resolve_and_add_panchayat(sb_search_val, active_lat, active_lon, active_reg_title, selected_region_key, data)
                     if found_v:
-                        st.toast(f"📍 Added {found_v['name']} ({found_v['distance_km']}km away)!", icon="🏛️")
+                        st.toast(f"Located {found_v['name']} ({found_v['distance_km']} km away)", icon="✓")
                         st.rerun()
                     else:
-                        st.warning(f"No village matching '{sb_search_val}' found within 20km of {active_reg_title}.")
+                        st.warning(f"No village matching '{sb_search_val}' found within 30km bounds.")
 
         def _sync_sidebar_gp():
             chosen = st.session_state.get("sb_gp_idx", 0)
@@ -532,9 +873,9 @@ with st.sidebar:
                 st.session_state.selected_gp_idx = 0
 
         st.selectbox(
-            "Select Village / Gram Panchayat:",
+            "Active Gram Panchayat Station:",
             range(len(gp_names)),
-            format_func=lambda i: f"🏛️ {gp_names[i]} ({panchayats[i].get('elevation_m')}m)",
+            format_func=lambda i: f"{gp_names[i].upper()} [{panchayats[i].get('elevation_m')}M]",
             index=valid_idx,
             key="sb_gp_idx",
             on_change=_sync_sidebar_gp
@@ -544,9 +885,9 @@ with st.sidebar:
     else:
         st.caption("Active location: 1km grid center")
 
-    st.markdown("---")
+    st.markdown("""<div style="height: 10px;"></div>""", unsafe_allow_html=True)
     is_right_open = st.session_state.get("show_ai_right_panel", False)
-    if st.button("🤖 " + ("Hide AI Chat Slidebar" if is_right_open else "Open AI Chat Slidebar"), key="sb_toggle_right_ai", use_container_width=True, type="primary" if not is_right_open else "secondary"):
+    if st.button("TERMINAL // " + ("HIDE ADVISOR" if is_right_open else "OPEN ADVISOR"), key="sb_toggle_right_ai", use_container_width=True, type="primary" if not is_right_open else "secondary"):
         st.session_state.show_ai_right_panel = not is_right_open
         st.rerun()
 
@@ -562,7 +903,7 @@ if "agent_thread_id" not in st.session_state or st.session_state.get("active_reg
     st.session_state.agent_messages = [
         {
             "role": "assistant",
-            "content": f"👋 Hello! I am **GramVayu AI**, your microclimate advisor for **{current_reg_name}**.\n\nI have evaluated the 1km downscaled physics telemetry across **{len(panchayats)} Gram Panchayats** (elevation span **{elev_r[0]:.0f}m to {elev_r[1]:.0f}m**).\n\nAsk me about frost hazard in valley basins, specific village forecasts, irrigation water budgets, crop disease alerts, or inquire about external regions (e.g. Pune, Nashik)!",
+            "content": f"Operational Advisory Active for **{current_reg_name}**.\n\nDownscaled 1km physics telemetry evaluated across **{len(panchayats)} Gram Panchayats** (elevation span **{elev_r[0]:.0f}m to {elev_r[1]:.0f}m**).\n\nStanding by for inquiries regarding valley cold-air pooling, elevation thermal deltas, irrigation requirements, and phytosanitary windows.",
             "tools": []
         }
     ]
@@ -640,156 +981,192 @@ else:
 # =============================================================================
 
 with col_main:
-    # 1. BIG PROMINENT HERO LOGO & TITLE BANNER AT TOP OF PROJECT
-    banner_c1, banner_c2 = st.columns([4.0, 1.4])
+    # 1. ARCHITECTURAL SCIENTIFIC MASTHEAD
+    banner_c1, banner_c2 = st.columns([3.8, 1.2])
     with banner_c1:
-        st.markdown("""
-        <div style="background: linear-gradient(135deg, #091322 0%, #111e33 50%, #0c233c 100%); border-radius: 16px; padding: 20px 26px; border: 2px solid #38bdf8; box-shadow: 0 10px 32px rgba(0,0,0,0.5); margin-bottom: 14px;">
-          <div style="display: flex; align-items: center; gap: 18px;">
-            <div style="background: rgba(56, 189, 248, 0.15); border: 2px solid #38bdf8; border-radius: 50%; width: 64px; height: 64px; display: flex; align-items: center; justify-content: center; font-size: 34px; box-shadow: 0 0 20px rgba(56, 189, 248, 0.35); flex-shrink: 0;">
-              🌾
-            </div>
-            <div>
-              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                <h1 style="margin: 0; color: #f8fafc; font-size: 30px; font-weight: 900; letter-spacing: -0.5px; font-family: 'Inter', sans-serif;">
-                  GramVayu <span style="color: #38bdf8; font-size: 22px; font-weight: 700;">(ग्रामवायु)</span>
-                </h1>
-                <span class="badge-live" style="font-size: 10px; padding: 3px 8px;">LIVE 1KM</span>
-                <span class="badge-channel" style="font-size: 10px; padding: 3px 8px;">16 Physical Channels</span>
-              </div>
-              <p style="margin: 4px 0 0 0; color: #94a3b8; font-size: 13.5px; font-weight: 500;">
-                Universal Physics-Guided Microclimate Downscale Engine & Hyperlocal Village Early Warning System
-              </p>
-              <div style="margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; font-size: 11px; color: #cbd5e1;">
-                <span style="background: #1e293b; padding: 3px 10px; border-radius: 6px; border: 1px solid #475569;">🏛️ IMD GKMS Aligned</span>
-                <span style="background: #1e293b; padding: 3px 10px; border-radius: 6px; border: 1px solid #475569;">🔬 ResAttnUNet AI + SRTM 1km DEM</span>
-                <span style="background: #1e293b; padding: 3px 10px; border-radius: 6px; border: 1px solid #475569;">🇮🇳 Smart India Hackathon 2026</span>
-              </div>
-            </div>
+        st.markdown(f"""
+        <div class="masthead-frame">
+          <div class="masthead-tag">SYS.ID // IMD-GKMS METEOROLOGICAL DISPATCH // 1 KM² PRECISION GRID</div>
+          <div class="masthead-name">
+            GRAMVAYU <span class="masthead-vernacular">(ग्रामवायु)</span>
+          </div>
+          <div class="masthead-desc">
+            Universal physics-guided atmospheric downscale architecture. Generates 1km² contiguous prognostic fields across complex topographic relief.
+          </div>
+          <div style="margin-top: 14px; display: flex; gap: 18px; flex-wrap: wrap; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8c96a5;">
+            <span>DOMAIN: <b style="color: #f2efe9;">{active_reg_title}</b></span>
+            <span>COORDS: <b style="color: #f2efe9;">{active_lat:.2f}°N, {active_lon:.2f}°E</b></span>
+            <span>ELEV SPAN: <b style="color: #f2efe9;">{elev_r[0]:.0f}m — {elev_r[1]:.0f}m MSL</b></span>
+            <span>CHANNELS: <b style="color: #ff4a1c;">16 PHYSICAL RESIDUALS</b></span>
           </div>
         </div>
         """, unsafe_allow_html=True)
 
     with banner_c2:
-        st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-        # Dedicated Right Slidebar Button that toggles the Right Slidebar!
-        if st.button("🤖 " + ("Close AI Chatbot" if show_right_panel else "Open AI Chat Slidebar"), key="banner_toggle_right_ai", use_container_width=True, type="primary" if not show_right_panel else "secondary"):
+        st.markdown(f"""
+        <div style="background-color: var(--surface); border: 1px solid var(--border-hairline); border-radius: 4px; padding: 18px 20px; margin-bottom: 12px;">
+          <div style="font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.14em; color: #8c96a5; text-transform: uppercase;">
+            CELL SPECIFICATION
+          </div>
+          <div style="font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 800; color: #f2efe9; margin: 4px 0 2px 0;">
+            1.0 km × 1.0 km
+          </div>
+          <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #10b981;">
+            ● STATUS: NOMINAL
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Terminal // AI Advisor" if not show_right_panel else "Close Terminal", key="banner_toggle_right_ai", use_container_width=True, type="primary" if not show_right_panel else "secondary"):
             st.session_state.show_ai_right_panel = not show_right_panel
             st.rerun()
 
-        st.markdown("""
-        <div style="background: #1e2530; border-radius: 10px; padding: 10px 12px; border: 1px solid #374151; text-align: center; margin-top: 8px;">
-          <div style="font-size: 11px; color: #94a3b8;">Downscale Cell</div>
-          <div style="font-size: 14px; color: #38bdf8; font-weight: 800;">1 km × 1 km Physical</div>
+    # 2. ACTIVE STATION DOSSIER
+    st.markdown(f"""
+    <div class="station-dossier" style="border-left: 3px solid var(--accent-amber);">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <div class="station-overline">STATION OBSERVATION LEDGER // ACTIVE FOCUS</div>
+          <div class="station-h1">{curr_p.get('panchayat_name')}</div>
+          <div class="station-meta-grid">
+            <span class="station-meta-item">TALUK: <b>{curr_p.get('taluk', 'Block')}</b></span>
+            <span class="station-meta-item">DISTRICT: <b>{active_reg_title}</b></span>
+            <span class="station-meta-item">ELEVATION: <b>{curr_p.get('elevation_m', 500)}m MSL</b></span>
+            <span class="station-meta-item">AGRO-SYSTEM: <b style="color: #34d399;">{curr_p.get('major_crops', 'Local Agriculture')}</b></span>
+          </div>
         </div>
-        """, unsafe_allow_html=True)
+        <div style="text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8c96a5;">
+          <div>STATION {valid_idx + 1} OF {len(panchayats)}</div>
+          <div style="color: var(--accent); font-weight: 700; margin-top: 2px;">HYPERLOCAL TARGET</div>
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # 2. Top Hero Header Card with Active Village Focus
-    col_hero_info, col_hero_switch = st.columns([3.2, 1.8])
-    with col_hero_info:
+    # 3. OPERATIONAL DIAGNOSTIC MATRIX & FIELD DIRECTIVE
+    is_frost_risk = ("Warning" in frost_b or "Danger" in frost_b or "Alert" in frost_b or w_s.get('temp_min_c', 15.0) <= 3.0)
+    is_blight_risk = ("Alert" in blight_b or "Danger" in blight_b or w_s.get('relative_humidity_pct', 65) >= 85)
+    is_spray_bad = ("Do Not" in spray_b or "Postpone" in spray_b or w_s.get('wind_speed_kmh', 8.0) >= 15 or w_s.get('precipitation_mm', 0.0) > 0.5)
+    p_tmax = w_s.get('temp_max_c', 25.0)
+    p_rain = w_s.get('precipitation_mm', 0.0)
+    is_heat_risk = (p_tmax >= 34.0)
+
+    col_diag_main, col_diag_matrix = st.columns([1.5, 2.5], gap="medium")
+    with col_diag_main:
         st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-radius: 14px; padding: 18px 24px; border: 2px solid #3b82f6; box-shadow: 0 8px 24px rgba(0,0,0,0.4); margin-bottom: 12px;">
-          <div style="font-size: 12px; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px;">
-            🚨 Gram Panchayat Microclimate Early Warning Bulletin
+        <div style="background-color: var(--surface); border: 1px solid var(--border-hairline); border-top: 2px solid {'#ef4444' if (is_frost_risk or is_blight_risk or is_heat_risk) else '#10b981'}; border-radius: 4px; padding: 18px 20px; height: 100%; display: flex; flex-direction: column; justify-content: space-between;">
+          <div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: {'#f87171' if (is_frost_risk or is_blight_risk or is_heat_risk) else '#34d399'}; font-weight: 700; margin-bottom: 6px;">
+              DIRECTIVE // IMMEDIATE FIELD ACTION
+            </div>
+            <div style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 14px; font-weight: 600; color: #f2efe9; line-height: 1.5; margin-bottom: 12px;">
+              {curr_p.get('primary_action', 'Maintain standard vegetative management and planned irrigation.')}
+            </div>
           </div>
-          <h2 style="margin: 0; color: #f8fafc; font-size: 26px; font-weight: 800;">
-            🏛️ {curr_p.get('panchayat_name')}
-          </h2>
-          <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 14px;">
-            Taluk: <b style="color: #60a5fa;">{curr_p.get('taluk', 'Block')}</b> &nbsp;|&nbsp; 
-            District: <b style="color: #60a5fa;">{active_reg_title}</b> &nbsp;|&nbsp; 
-            Elevation: <b style="color: #60a5fa;">{curr_p.get('elevation_m', 500)}m</b><br>
-            🌾 Major Agriculture: <b style="color: #34d399;">{curr_p.get('major_crops', 'Local Agriculture')}</b>
-          </p>
+          <div style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #8c96a5; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
+            PROTOCOL: IMD-GKMS AGRO-ADVISORY • HOURLY REVISION
+          </div>
         </div>
         """, unsafe_allow_html=True)
 
-    with col_hero_switch:
+    with col_diag_matrix:
         st.markdown(f"""
-        <div style="background: #1e2530; border-radius: 14px; padding: 18px 20px; border: 1px solid #374151; height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 8px;">
-          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <span class="badge-channel" style="font-size: 11px;">✅ 1km Downscaled Reality</span>
-            <span class="badge-live" style="font-size: 11px;">🔴 IMD GKMS Directives</span>
+        <div class="matrix-container">
+          <div class="matrix-row">
+            <span class="matrix-code">HAZ.01 // FROST</span>
+            <span class="matrix-label">Valley Cold-Air Inversion</span>
+            <span class="matrix-reading">Night Min: {w_s.get('temp_min_c', 15.0):.1f}°C</span>
+            <span class="matrix-status {'status-crit' if is_frost_risk else 'status-safe'}">{'ALERT // FREEZING' if is_frost_risk else 'NOMINAL // SAFE'}</span>
           </div>
-          <div style="font-size: 13px; color: #f1f5f9; font-weight: 600;">
-            🏛️ Showing Village {valid_idx + 1} of {len(panchayats)} in {active_reg_title}
+          <div class="matrix-row">
+            <span class="matrix-code">HAZ.02 // BLIGHT</span>
+            <span class="matrix-label">Fungal Spore Germination Index</span>
+            <span class="matrix-reading">Ambient RH: {w_s.get('relative_humidity_pct', 65)}%</span>
+            <span class="matrix-status {'status-crit' if is_blight_risk else 'status-safe'}">{'CRITICAL // HIGH HUMIDITY' if is_blight_risk else 'LOW RISK // SUPPRESSED'}</span>
           </div>
-          <div style="font-size: 12px; color: #94a3b8;">
-            👈 Click any village in the grid below or choose in the sidebar to inspect.
+          <div class="matrix-row">
+            <span class="matrix-code">HAZ.03 // SPRAY</span>
+            <span class="matrix-label">Foliar Agrochemical Drift Window</span>
+            <span class="matrix-reading">Topographic Wind: {w_s.get('wind_speed_kmh', 8.0):.1f} km/h</span>
+            <span class="matrix-status {'status-warn' if is_spray_bad else 'status-safe'}">{'HOLD // DRIFT HAZARD' if is_spray_bad else 'OPEN // OPTIMAL DRIFT'}</span>
+          </div>
+          <div class="matrix-row">
+            <span class="matrix-code">HAZ.04 // WATER</span>
+            <span class="matrix-label">Soil Transpirational Flux</span>
+            <span class="matrix-reading">ET₀: {p_et0:.1f} mm/d ({p_water_l:,} L/ha)</span>
+            <span class="matrix-status status-warn">DEMAND CALCULATED</span>
+          </div>
+          <div class="matrix-row">
+            <span class="matrix-code">HAZ.05 // THERM</span>
+            <span class="matrix-label">Canopy Heat Accumulation</span>
+            <span class="matrix-reading">Peak Max: {p_tmax:.1f}°C</span>
+            <span class="matrix-status {'status-crit' if is_heat_risk else 'status-safe'}">{'THERMAL STRESS' if is_heat_risk else 'PHYSIOLOGICAL OPTIMUM'}</span>
           </div>
         </div>
         """, unsafe_allow_html=True)
 
-    # 3. Five Critical Village Hazard Warning Cards (The 5 Essential Climate Variables)
-    h_col1, h_col2, h_col3, h_col4, h_col5 = st.columns(5)
-
-    with h_col1:
-        if "Warning" in frost_b or "Danger" in frost_b or "Alert" in frost_b or w_s.get('temp_min_c', 15.0) <= 3.0:
-            st.error(f"❄️ **Frost Hazard Alert**\n\n**🔴 Freezing Risk Tonight**\n\n{adv.get('frost', {}).get('action', 'Cold-air pooling expected. Turn on light sprinklers at 4:00 AM.')}")
-        else:
-            st.success(f"❄️ **Frost & Cold Wave**\n\n**🟢 Safe Tonight (No Freezing)**\n\n{adv.get('frost', {}).get('action', 'Night temperature stays safely above freezing.')}")
-
-    with h_col2:
-        if "Alert" in blight_b or "Danger" in blight_b or w_s.get('relative_humidity_pct', 65) >= 85:
-            st.error(f"🍄 **Crop Fungal Blight**\n\n**🔴 High Blight Risk**\n\n{adv.get('blight', {}).get('action', 'High moisture (RH ≥ 85%) favors late blight. Avoid wetting crop leaves.')}")
-        else:
-            st.success(f"🍄 **Crop Fungal Blight**\n\n**🟢 Disease Pressure Low**\n\n{adv.get('blight', {}).get('action', 'Atmospheric moisture is low; fungal spore germination is suppressed.')}")
-
-    with h_col3:
-        if "Do Not" in spray_b or "Postpone" in spray_b or w_s.get('wind_speed_kmh', 8.0) >= 15 or w_s.get('precipitation_mm', 0.0) > 0.5:
-            st.warning(f"🚜 **Medicine Spray Window**\n\n**🟡 Postpone Spraying**\n\n{adv.get('spray_window', {}).get('reason', 'Gusty winds or high heat detected. Chemical drift risk.')}")
-        else:
-            st.success(f"🚜 **Medicine Spray Window**\n\n**🟢 Safe Window Open**\n\n{adv.get('spray_window', {}).get('reason', 'Winds calm (< 12 km/h) and no rain. Ideal time to apply foliar medicine.')}")
-
-    with h_col4:
-        st.info(f"💧 **Soil Irrigation Need**\n\n**☀️ {p_et0:.1f} mm / day**\n\nCrops lost **{p_water_l:,} L / ha** today. Recommended drip irrigation: ~3 to 4 hours.")
-
-    with h_col5:
-        p_tmax = w_s.get('temp_max_c', 25.0)
-        p_rain = w_s.get('precipitation_mm', 0.0)
-        if p_tmax >= 38.0:
-            st.error(f"☀️ **Extreme Heatwave Alert**\n\n**🔴 Sun-Scald Danger**\n\nMax temp reaches {p_tmax:.1f}°C. Provide overhead shade to tender crops.")
-        elif p_rain >= 15.0:
-            st.error(f"🌧️ **Waterlogging Alert**\n\n**🔴 Runoff Risk**\n\nHigh rainfall ({p_rain:.1f} mm). Ensure field drainage ditches are unblocked.")
-        elif p_tmax >= 34.0:
-            st.warning(f"☀️ **Moderate Heat Stress**\n\n**🟡 Wilting Risk**\n\nMax temp reaches {p_tmax:.1f}°C. Mulch root zones to conserve soil moisture.")
-        else:
-            st.success(f"☀️ **Thermal Comfort**\n\n**🟢 Optimal Vegetative Range**\n\nMax temp {p_tmax:.1f}°C and rainfall {p_rain:.1f}mm stay within ideal crop physiological limits.")
-
-    # 4. Today's Village Weather Telemetry at a Glance
-    st.markdown(f"#### ⛅ 1km Telemetry at a Glance in {curr_p.get('panchayat_name')}:")
-    w1, w2, w3, w4, w5 = st.columns(5)
-    with w1:
-        st.metric("Temperature", f"{w_s.get('temp_mean_c', 20.0):.1f}°C", f"Min {w_s.get('temp_min_c', 15.0):.1f}° / Max {w_s.get('temp_max_c', 25.0):.1f}°")
-    with w2:
-        st.metric("Air Humidity", f"{w_s.get('relative_humidity_pct', 65)}%", f"Dew Point: {w_s.get('dew_point_c', 15.0):.1f}°C")
-    with w3:
-        st.metric("Surface Wind", f"{w_s.get('wind_speed_kmh', 8.0):.1f} km/h", "Topographic Wind")
-    with w4:
-        st.metric("Precipitation", f"{w_s.get('precipitation_mm', 0.0):.1f} mm", "Rainfall Gauge")
-    with w5:
-        st.metric("Soil Water Loss", f"{p_et0:.1f} mm/day", f"{p_water_l:,} L/ha Need")
+    # 4. TELEMETRY INSTRUMENT STRIP
+    st.markdown(f"""
+    <div class="telemetry-strip" style="margin-top: 14px;">
+      <div class="telemetry-cell">
+        <div class="telemetry-tag">01 // TEMPERATURE (MEAN)</div>
+        <div class="telemetry-val">{w_s.get('temp_mean_c', 20.0):.1f}<span style="font-size: 14px; font-weight: 400; color: #8c96a5;"> °C</span></div>
+        <div class="telemetry-sub">SPREAD: {w_s.get('temp_min_c', 15.0):.1f}° — {w_s.get('temp_max_c', 25.0):.1f}°C</div>
+      </div>
+      <div class="telemetry-cell">
+        <div class="telemetry-tag">02 // RELATIVE HUMIDITY</div>
+        <div class="telemetry-val">{w_s.get('relative_humidity_pct', 65)}<span style="font-size: 14px; font-weight: 400; color: #8c96a5;"> %</span></div>
+        <div class="telemetry-sub">DEW POINT: {w_s.get('dew_point_c', 15.0):.1f}°C</div>
+      </div>
+      <div class="telemetry-cell">
+        <div class="telemetry-tag">03 // SURFACE WIND (10M)</div>
+        <div class="telemetry-val">{w_s.get('wind_speed_kmh', 8.0):.1f}<span style="font-size: 14px; font-weight: 400; color: #8c96a5;"> km/h</span></div>
+        <div class="telemetry-sub">TOPOGRAPHIC DEFLECTION</div>
+      </div>
+      <div class="telemetry-cell">
+        <div class="telemetry-tag">04 // 24H PRECIPITATION</div>
+        <div class="telemetry-val">{w_s.get('precipitation_mm', 0.0):.1f}<span style="font-size: 14px; font-weight: 400; color: #8c96a5;"> mm</span></div>
+        <div class="telemetry-sub">OROGRAPHIC PLUVIOMETER</div>
+      </div>
+      <div class="telemetry-cell">
+        <div class="telemetry-tag">05 // DAILY WATER FLUX</div>
+        <div class="telemetry-val">{p_et0:.1f}<span style="font-size: 14px; font-weight: 400; color: #8c96a5;"> mm/d</span></div>
+        <div class="telemetry-sub">{p_water_l:,} LITERS / HECTARE</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # =========================================================================
     # 4. INTERACTIVE 1KM MICROCLIMATE REGION MAP
     # =========================================================================
-    st.markdown("---")
-    st.markdown(f"### 🗺️ Microclimate Relief Map: {active_reg_title}")
-    st.caption(f"1km physical downscaling field draped across mountain relief with interactive pins for all {len(panchayats)} authentic Gram Panchayats. Click any button below to focus.")
+    st.markdown("""<div style="height: 12px;"></div>""", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="section-tagline">SECTION // 04 · CARTOGRAPHIC PROJECTION</div>
+    <div class="section-headline">1 KM² PHYSICAL RELIEF & REGIONAL MICROCLIMATE // {active_reg_title.upper()}</div>
+    <div class="section-description">High-resolution physical downscaling layer draped across mountain relief with precision coordinates for all {len(panchayats)} authentic Gram Panchayats. Select any station below to adjust focus.</div>
+    """, unsafe_allow_html=True)
 
     # ALL Gram Panchayats Quick Switcher Grid (Multi-row, NO 5-button cap!)
     if panchayats and len(panchayats) > 1:
-        st.markdown(f"**🔍 Search Any Village / Gram Panchayat in {active_reg_title} (30×30 km Footprint):**")
+        st.markdown(f"""
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;">
+            <span style="font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-secondary); text-transform: uppercase;">
+                STATION DISPATCH SEARCH // 30×30 KM BOUNDING FOOTPRINT
+            </span>
+            <span style="font-family: var(--mono); font-size: 10px; color: var(--text-muted); font-family: var(--mono);">
+                TOTAL AVAILABLE STATIONS: {len(panchayats)}
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
         gp_c1, gp_c2 = st.columns([3.8, 1.2])
         with gp_c1:
             search_gp_query = st.text_input(
                 "Search Village or Gram Panchayat:",
-                placeholder=f"Type village name in {active_reg_title} (e.g. Pipraich, Sahjanwa, Ghoom, Somwarpet...)",
+                placeholder=f"Enter village / panchayat name in {active_reg_title} (e.g. Khadakwasla, Somwarpet, Ghoom)...",
                 key="input_search_gp_text",
                 label_visibility="collapsed"
             )
         with gp_c2:
-            search_gp_btn = st.button("🔎 Find Village", key="btn_do_search_gp", use_container_width=True, type="primary")
+            search_gp_btn = st.button("LOCATE STATION", key="btn_do_search_gp", use_container_width=True, type="primary")
 
         if (search_gp_btn or (search_gp_query and len(search_gp_query.strip()) >= 3)):
             q = search_gp_query.strip()
@@ -806,17 +1183,21 @@ with col_main:
                     st.session_state.pop("sb_gp_idx", None)
                     st.rerun()
                 else:
-                    st.info(f"⭐ Active Village Focus: **{panchayats[matched_idx]['panchayat_name']}** ({panchayats[matched_idx].get('elevation_m')}m)")
+                    st.markdown(f"""<div style="font-family: var(--mono); font-size: 11px; color: var(--accent); padding: 8px 14px; background: rgba(255, 74, 28, 0.08); border-left: 2px solid var(--accent); border-radius: 2px; margin-bottom: 12px;">ACTIVE FOCUS // {panchayats[matched_idx]['panchayat_name'].upper()} [{panchayats[matched_idx].get('elevation_m')}M]</div>""", unsafe_allow_html=True)
             elif search_gp_btn:
-                with st.spinner(f"Locating '{q}' within 30×30 km area of {active_reg_title}..."):
+                with st.spinner(f"Locating '{q}' within 30×30 km footprint of {active_reg_title}..."):
                     found_cand = resolve_and_add_panchayat(q, active_lat, active_lon, active_reg_title, selected_region_key, data)
                 if found_cand:
-                    st.toast(f"📍 Added {found_cand['name']} ({found_cand['distance_km']} km away)!", icon="🏛️")
+                    st.toast(f"Located {found_cand['name']} ({found_cand['distance_km']} km away)", icon="✓")
                     st.rerun()
                 else:
-                    st.warning(f"⚠️ No village matching '{q}' found within the 30×30 km area of {active_reg_title}. Please check spelling or select from available villages below.")
+                    st.warning(f"No village matching '{q}' found within 30×30 km bounding footprint of {active_reg_title}. Verify spelling or select from available registry below.")
 
-        st.markdown(f"**📍 Quick Select Any Gram Panchayat in {active_reg_title} ({len(panchayats)} Available):**")
+        st.markdown(f"""
+        <div style="font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-muted); text-transform: uppercase; margin: 14px 0 8px 0;">
+            STATION QUICK SELECT // {len(panchayats)} RECORDED LOCALITIES:
+        </div>
+        """, unsafe_allow_html=True)
         cols_per_row = 6 if len(panchayats) > 6 else len(panchayats)
         for row_start in range(0, len(panchayats), cols_per_row):
             row_panchayats = panchayats[row_start:row_start + cols_per_row]
@@ -824,7 +1205,8 @@ with col_main:
             for c_idx, p_b in enumerate(row_panchayats):
                 global_idx = row_start + c_idx
                 is_active_btn = (global_idx == valid_idx)
-                btn_title = f"{'⭐ ' if is_active_btn else '🏛️ '}{p_b['panchayat_name'][:13]} ({p_b.get('elevation_m')}m)"
+                short_p_name = p_b['panchayat_name'].replace(" Gram Panchayat", "").replace(" Nagar Panchayat", "")[:12].upper()
+                btn_title = f"{'▸ ' if is_active_btn else ''}{short_p_name} [{p_b.get('elevation_m')}M]"
                 with btn_cols[c_idx]:
                     if st.button(
                         btn_title,
@@ -840,8 +1222,8 @@ with col_main:
     ctrl_m1, ctrl_m2, ctrl_m3 = st.columns([1.5, 1.3, 1.2])
     with ctrl_m1:
         reg_syn_var = st.selectbox(
-            "Microclimate Variable Layer:",
-            ["🌡️ Temperature (°C)", "💧 Relative Humidity (%)", "💨 Surface Wind (km/h)", "🌧️ Precipitation (mm)", "☀️ Evapotranspiration ET₀ (mm/day)"],
+            "SYNTHESIS VARIABLE LAYER:",
+            ["Temperature (°C)", "Relative Humidity (%)", "Surface Wind (km/h)", "Precipitation (mm)", "Evapotranspiration ET₀ (mm/day)"],
             index=0,
             key="reg_syn_var"
         )
@@ -858,13 +1240,14 @@ with col_main:
 
     with ctrl_m2:
         reg_cmap_choice = st.selectbox(
-            "Shader Colormap:",
-            ["turbo (Radar)", "coolwarm (Thermal Delta)", "plasma (Neon Gradient)", "viridis (Optic)", "YlGnBu (Moisture)"],
+            "COLORMAP SHADER:",
+            ["turbo (Spectral Radar)", "coolwarm (Thermal Gradient)", "plasma (Radiance)", "viridis (Optic Contrast)", "YlGnBu (Moisture Flux)"],
             index=0,
             key="reg_cmap_choice"
         ).split(" ")[0]
     with ctrl_m3:
-        reg_transparency = st.slider("Shader Opacity:", 0.30, 0.95, 0.70, 0.05, key="reg_transparency")
+        reg_transparency = st.slider("LAYER OPACITY:", 0.30, 0.95, 0.70, 0.05, key="reg_transparency")
+
 
     # Region coordinates & bounding box
     active_target = st.session_state.get("active_region_info", {
@@ -1011,9 +1394,6 @@ with col_main:
     # =========================================================================
     # 5. CROP-SPECIFIC AGRONOMIC FIELD DIRECTIVES & SCIENTIFIC RULE ENGINE
     # =========================================================================
-    st.markdown(f"#### 🌾 Village-Specific Agronomic Field Directives for {curr_p.get('panchayat_name')}")
-    st.caption(f"Actionable crop operations tailored to local elevation ({curr_p.get('elevation_m')}m), {curr_p.get('major_crops', 'local crops')}, and 1km downscaled microclimate.")
-
     def get_crop_agronomic_directives(p_info, ws, adv_dict):
         crops_lower = p_info.get("major_crops", "").lower()
         elev = p_info.get("elevation_m", 500)
@@ -1027,17 +1407,17 @@ with col_main:
 
         # 1. Canopy / Stage Management
         if "coffee" in crops_lower or "pepper" in crops_lower or "cardamom" in crops_lower:
-            canopy_txt = f"Regulate shade tree canopy to 50% light penetration. High humidity ({rh}%) requires inter-row air circulation between coffee bushes to suppress black rot (*Koleroga*) and berry borer."
-            irrig_txt = f"Deliver {w_liters:,} L/ha via root-zone basin irrigation. Ensure drainage lines along pepper support standards (*vines*) remain clear to prevent collar rot."
-            nutrient_txt = f"Spray 1% Bordeaux mixture on clearing mornings if RH > 80%. Delay foliar nutrient applications when ridge winds exceed {wind:.1f} km/h to prevent drift."
-            protect_txt = f"Cover drying yard parchment coffee sheets by 3:30 PM before evening valley dew sets in. House estate draft animals in dry, raised sheds."
+            canopy_txt = f"Regulate shade tree canopy to 50% light penetration. Elevated ambient humidity ({rh}%) requires inter-row air circulation between bushes to suppress black rot (Koleroga) and berry borer."
+            irrig_txt = f"Deliver {w_liters:,} L/ha via root-zone basin irrigation. Ensure drainage lines along pepper support standards (vines) remain clear to prevent collar rot."
+            nutrient_txt = f"Spray 1% Bordeaux mixture on clearing mornings if RH exceeds 80%. Delay foliar nutrient applications when ridge winds exceed {wind:.1f} km/h to prevent drift."
+            protect_txt = f"Cover drying yard parchment coffee sheets by 15:30 before valley dew condensation sets in. House estate draft animals in dry, raised shelters."
         elif "apple" in crops_lower or "plum" in crops_lower or "cherries" in crops_lower:
-            canopy_txt = f"Prune water-sprouts and collect fallen leaf litter to eliminate overwintering Apple Scab (*Venturia inaequalis*) fungal ascospores at {elev}m altitude."
+            canopy_txt = f"Prune water-sprouts and collect fallen leaf litter to eliminate overwintering Apple Scab (Venturia inaequalis) fungal ascospores at {elev}m altitude."
             irrig_txt = f"Maintain drip irrigation delivering {w_liters:,} L/ha to tree drip-lines during fruit swelling. Avoid evening soaking that encourages root crown rot."
-            nutrient_txt = f"Schedule dormant tree oil or calcium nitrate foliar spray during the calm morning window (< 10 km/h wind). Postpone spray if rain probability > 2mm."
+            nutrient_txt = f"Schedule dormant tree oil or calcium nitrate foliar spray during calm morning window (winds under 10 km/h). Postpone spray if rain probability exceeds 2mm."
             protect_txt = f"Check crate ventilation in apple transit storage sheds. Provide dry straw bedding and mineral salt licks for livestock during cold night drops ({t_min:.1f}°C)."
         elif "wheat" in crops_lower or "mustard" in crops_lower or "potato" in crops_lower:
-            canopy_txt = f"Scout lower leaf canopy for yellow rust (*Puccinia striiformis*) pustules and mustard aphids favored by cool morning dew ({rh}% RH)."
+            canopy_txt = f"Scout lower leaf canopy for yellow rust (Puccinia striiformis) pustules and mustard aphids favored by cool morning dew ({rh}% RH)."
             irrig_txt = f"Irrigate crown root initiation (CRI) or potato tuber bulking zone with {w_liters:,} L/ha. Avoid water ponding to prevent root hypoxia."
             nutrient_txt = f"Apply second split of nitrogen (urea) right before scheduled light irrigation. Spray mancozeb for potato blight only when wind is under 12 km/h."
             protect_txt = f"Store harvested grains on elevated wooden pallets. Hang protective jute gunny curtains on the windward face of dairy cattle sheds."
@@ -1050,30 +1430,57 @@ with col_main:
             canopy_txt = f"Maintain crop row aeration and clean weeding to reduce damp microclimate pockets near the soil line (current RH: {rh}%)."
             irrig_txt = f"Daily crop water loss is {et0:.1f} mm/day ({w_liters:,} L/ha). Schedule light, frequent irrigations during early morning hours."
             nutrient_txt = f"Apply balanced NPK fertigation according to vegetative stage. Postpone foliar pesticide sprays if wind speed exceeds 14 km/h."
-            protect_txt = f"Dry harvested produce to < 12% grain moisture before bagging. Provide clean drinking water and windbreak shelter for dairy livestock."
+            protect_txt = f"Dry harvested produce to under 12% grain moisture before bagging. Provide clean drinking water and windbreak shelter for dairy livestock."
 
         return canopy_txt, irrig_txt, nutrient_txt, protect_txt
 
     d_canopy, d_irrig, d_nutr, d_prot = get_crop_agronomic_directives(curr_p, w_s, adv)
 
-    d_c1, d_c2, d_c3, d_c4 = st.columns(4)
-    with d_c1:
-        st.markdown("**🌿 Canopy & Crop-Stage Operations:**")
-        st.info(d_canopy)
-    with d_c2:
-        st.markdown("**🚿 Precision Irrigation Scheduling:**")
-        st.info(d_irrig)
-    with d_c3:
-        st.markdown("**🧪 Soil Nutrient & Foliar Care:**")
-        st.info(d_nutr)
-    with d_c4:
-        st.markdown("**🐮 Livestock & Post-Harvest Care:**")
-        st.info(d_prot)
+    st.markdown(f"""
+    <div style="height: 20px;"></div>
+    <div class="section-tagline">SECTION // 05 · AGRONOMIC DISPATCH PROTOCOLS</div>
+    <div class="section-headline">OPERATIONAL FIELD DIRECTIVES // {curr_p.get('panchayat_name').upper()}</div>
+    <div class="section-description">Elevation-adjusted crop operations based on 1km downscaled microclimate ({curr_p.get('elevation_m')}m ASL) and local crop systems ({curr_p.get('major_crops', 'Local Agriculture')}).</div>
 
-
+    <div class="field-manual-grid">
+      <div class="field-card">
+        <div class="field-card-tag">DIRECTIVE 01 // CANOPY ARCHITECTURE</div>
+        <div class="field-card-title">Canopy & Stage Management</div>
+        <div class="field-card-body">{d_canopy}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-card-tag">DIRECTIVE 02 // HYDROLOGICAL BALANCE</div>
+        <div class="field-card-title">Precision Root-Zone Irrigation</div>
+        <div class="field-card-body">{d_irrig}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-card-tag">DIRECTIVE 03 // PHYTOSANITARY TIMING</div>
+        <div class="field-card-title">Nutrient & Foliar Spray Window</div>
+        <div class="field-card-body">{d_nutr}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-card-tag">DIRECTIVE 04 // HARVEST & BIOLOGICAL ASSETS</div>
+        <div class="field-card-title">Livestock & Post-Harvest Shelter</div>
+        <div class="field-card-body">{d_prot}</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # 6. WhatsApp Broadcast Box
-    st.markdown(f"#### 📲 1-Click WhatsApp Broadcast Bulletin for {curr_p.get('panchayat_name')}:")
+    st.markdown(f"""
+    <div class="bulletin-box">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+        <span style="font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: var(--text-primary); text-transform: uppercase;">
+          TELEMETRY DISPATCH BULLETIN // GKMS PANCHAYAT BROADCAST
+        </span>
+        <span style="font-family: var(--mono); font-size: 10px; color: var(--accent);">STATION: {curr_p.get('panchayat_name').upper()}</span>
+      </div>
+      <div style="font-family: var(--sans); font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">
+        Formatted dispatch ledger formatted for one-click copy into local Gram Panchayat administration or farmer channels:
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
     wa_text = (
         f"📢 *IMD GKMS Weather & Agro Alert for {curr_p.get('panchayat_name')}*\n"
         f"📍 Taluk: {curr_p.get('taluk', 'Block')} | Elevation: {curr_p.get('elevation_m')}m\n"
@@ -1091,24 +1498,29 @@ with col_main:
         f"─────────────────\n"
         f"Shared via GramVayu 1km Microclimate Downscaler"
     )
-    st.text_area("Copy text below to paste into Panchayat or Farmer WhatsApp groups:", value=wa_text, height=120)
+    st.text_area("Copy text below to paste into Panchayat or Farmer WhatsApp groups:", value=wa_text, height=120, label_visibility="collapsed")
 
-    st.markdown("---")
+    st.markdown("""<div style="height: 16px;"></div>""", unsafe_allow_html=True)
 
     # =========================================================================
     # 7. LOWER SUPPORTING TABS (UNIFIED & SPATIALLY ALIGNED 3-PANEL BREAKDOWN)
     # =========================================================================
     tab_table, tab_breakdown, tab_diurnal, tab_ground_stations = st.tabs([
-        f"📊 All Gram Panchayats in {active_reg_title} (Comparison Table)",
-        "🔬 Physical Downscaling Breakdown (Coarse vs 1km DEM vs 1km AI)",
-        "📈 24-Hour Diurnal Microclimate Profile",
-        "🧪 Ground Sensor Validation (Real NOAA ISD Thermometers)"
+        f"01 // STATION REGISTRY ({len(panchayats)})",
+        "02 // MULTI-SCALE DECOMPOSITION",
+        "03 // 24-HOUR DIURNAL TELEMETRY",
+        "04 // NOAA SENSOR VALIDATION"
     ])
 
     # TAB 1: ALL GRAM PANCHAYATS COMPARISON TABLE
     with tab_table:
-        st.subheader(f"📊 All Gram Panchayats in {active_reg_title} (Comparison Table)")
-        st.caption("Cross-village comparison of elevation, downscaled temperature, humidity, and irrigation requirements across the block.")
+        st.markdown(f"""
+        <div style="margin-bottom: 12px; margin-top: 10px;">
+            <div class="section-tagline">DIAGNOSTIC MATRIX // STATION COMPARISON</div>
+            <div class="section-headline">REGIONAL GRAM PANCHAYAT TELEMETRY REGISTRY // {active_reg_title.upper()}</div>
+            <div class="section-description">Cross-village comparison of elevation, downscaled temperature, relative humidity, and transpirational water demand across the active domain.</div>
+        </div>
+        """, unsafe_allow_html=True)
         if panchayats:
             table_data = []
             for p in panchayats:
@@ -1131,12 +1543,17 @@ with col_main:
 
     # TAB 2: UNIFIED & PERFECTLY ALIGNED 3-PANEL BREAKDOWN WITH GP PINS
     with tab_breakdown:
-        st.subheader("🔬 Physical Downscaling Breakdown (Coarse NWP vs 1km DEM vs 1km AI Reality)")
-        st.caption("All 3 subplots share identical geographic coordinates, North orientation, and synchronized color scales with authentic Gram Panchayat pins.")
+        st.markdown("""
+        <div style="margin-bottom: 12px; margin-top: 10px;">
+            <div class="section-tagline">SPATIAL DECOMPOSITION // MULTI-SCALE PHYSICS</div>
+            <div class="section-headline">PHYSICAL DOWNSCALING COMPARATIVE ANALYSIS</div>
+            <div class="section-description">Synchronized geographic coordinate bounds, shared aspect ratio, and North orientation comparing coarse reanalysis against 1km SRTM topography and ResAttnUNet physical output.</div>
+        </div>
+        """, unsafe_allow_html=True)
 
         chosen_breakdown_var = st.selectbox(
-            "Select Physical Variable Channel to Inspect:",
-            ["🌡️ Air Temperature (°C)", "💧 Relative Humidity (%)", "💨 Surface Wind Speed (km/h)", "🌧️ Precipitation (mm)", "☀️ Reference Evapotranspiration ET₀ (mm/day)"],
+            "SELECT PHYSICAL CHANNEL TO DECOMPOSE:",
+            ["Air Temperature (°C)", "Relative Humidity (%)", "Surface Wind Speed (km/h)", "Precipitation (mm)", "Reference Evapotranspiration ET₀ (mm/day)"],
             index=0,
             key="breakdown_var_picker"
         )
@@ -1239,8 +1656,13 @@ with col_main:
 
     # TAB 3: 24-HOUR DIURNAL MICROCLIMATE PROFILE
     with tab_diurnal:
-        st.subheader(f"📈 24-Hour Diurnal Microclimate Profile: {curr_p.get('panchayat_name')}")
-        st.caption(f"Hour-by-hour physical cycle for elevation {curr_p.get('elevation_m')}m showing dawn minimums, afternoon solar peaks, and precision spraying/irrigation windows.")
+        st.markdown(f"""
+        <div style="margin-bottom: 12px; margin-top: 10px;">
+            <div class="section-tagline">TEMPORAL PROFILE // 24-HOUR PHYSICAL HARMONICS</div>
+            <div class="section-headline">DIURNAL MICROCLIMATE CYCLE // {curr_p.get('panchayat_name').upper()}</div>
+            <div class="section-description">Hour-by-hour physical cycle for station elevation {curr_p.get('elevation_m')}m ASL tracking dawn valley cold-air pooling, solar flux peaks, and precision field operational windows.</div>
+        </div>
+        """, unsafe_allow_html=True)
 
         hours = list(range(24))
         hours_labels = [f"{h:02d}:00" for h in hours]
@@ -1296,21 +1718,32 @@ with col_main:
 
         st.plotly_chart(fig_diurnal, use_container_width=True)
 
-        col_w1, col_w2, col_w3 = st.columns(3)
-        with col_w1:
-            st.info("❄️ **Dawn Frost Risk Window (04:00 - 06:30):** Minimum temperatures drop to coldest basin levels. Valley cold-air pooling reaches peak intensity.")
-        with col_w2:
-            st.success("🚜 **Precision Spray Window (07:00 - 09:30):** Calm morning air (< 10 km/h) and moderate humidity allow agrochemicals to settle without drift.")
-        with col_w3:
-            st.warning("☀️ **Peak Evaporation Window (12:00 - 15:00):** Solar insolation peaks. High ET₀ causes maximum crop transpirational water stress.")
+        st.markdown("""
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px;">
+          <div style="background: var(--surface); border: 1px solid var(--border-hairline); border-left: 2px solid #38bdf8; border-radius: 3px; padding: 12px 14px;">
+            <div style="font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; color: #38bdf8; text-transform: uppercase; margin-bottom: 4px;">PHASE 01 // DAWN DRAINAGE (04:00 - 06:30)</div>
+            <div style="font-family: var(--sans); font-size: 11.5px; color: var(--text-secondary); line-height: 1.45;">Minimum temperatures drop to coldest basin levels. Valley cold-air drainage pooling reaches peak intensity.</div>
+          </div>
+          <div style="background: var(--surface); border: 1px solid var(--border-hairline); border-left: 2px solid #10b981; border-radius: 3px; padding: 12px 14px;">
+            <div style="font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; color: #10b981; text-transform: uppercase; margin-bottom: 4px;">PHASE 02 // SPRAY DISPATCH (07:00 - 09:30)</div>
+            <div style="font-family: var(--sans); font-size: 11.5px; color: var(--text-secondary); line-height: 1.45;">Calm morning surface air (winds under 10 km/h) and optimal relative humidity allow agrochemicals to settle without drift.</div>
+          </div>
+          <div style="background: var(--surface); border: 1px solid var(--border-hairline); border-left: 2px solid var(--accent-amber); border-radius: 3px; padding: 12px 14px;">
+            <div style="font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; color: var(--accent-amber); text-transform: uppercase; margin-bottom: 4px;">PHASE 03 // PEAK EVAPORATION (12:00 - 15:00)</div>
+            <div style="font-family: var(--sans); font-size: 11.5px; color: var(--text-secondary); line-height: 1.45;">Solar insolation peaks. Elevated reference ET₀ causes peak transpirational stress across exposed hill slopes.</div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     # TAB 4: GROUND SENSOR VALIDATION (REAL NOAA ISD THERMOMETERS)
     with tab_ground_stations:
-        st.subheader("Phase 2: Validation Against Real NOAA ISD Ground Sensors")
         st.markdown("""
-        To guarantee scientific rigor, our downscaling engine is verified against **actual physical weather station thermometers** 
-        from the official **NOAA Integrated Surface Database (ISD)** spanning elevations from **31m (coastal plains) to 2,202m (Himalayan ridges)**.
-        """)
+        <div style="margin-bottom: 12px; margin-top: 10px;">
+            <div class="section-tagline">GROUND TRUTH VALIDATION // PHYSICAL THERMOMETER RIGOR</div>
+            <div class="section-headline">NOAA INTEGRATED SURFACE DATABASE (ISD) BENCHMARK</div>
+            <div class="section-description">Rigorous verification against calibrated physical thermometers from 31m (coastal plains) to 2,202m (Himalayan ridges).</div>
+        </div>
+        """, unsafe_allow_html=True)
 
         try:
             b_resp = requests.get(f"{API_URL}/api/v1/ground-stations/benchmark", timeout=5).json()
@@ -1327,9 +1760,12 @@ with col_main:
             with c_b4:
                 st.metric("Our ResAttnUNet MAE", f"{overall.get('avg_mae_model_c', 2.05):.2f}°C", f"+{overall.get('overall_improvement_vs_lapse_physics_pct', 13.0):.1f}% over Physics")
 
-            st.markdown("---")
-            st.markdown("### 🏆 Master Ground Station Accuracy Benchmark")
-            st.caption("Lower MAE = Higher Accuracy. Compares our Physics + ResAttnUNet AI against both 10km Coarse NWP and Standard Physics across real NOAA thermometers.")
+            st.markdown("""<div style="height: 16px;"></div>""", unsafe_allow_html=True)
+            st.markdown("""
+            <div class="section-tagline">COMPARATIVE ACCURACY BENCHMARK // RESATTNUNET VS BASELINES</div>
+            <div class="section-headline" style="font-size: 16px;">MASTER GROUND SENSOR ERROR MATRIX</div>
+            <div class="section-description">Lower MAE = Higher Accuracy. Evaluates ResAttnUNet against 10km NWP and lapse-rate physics across real NOAA ISD physical sensors.</div>
+            """, unsafe_allow_html=True)
 
             table_rows = []
             for s in stations_bench:
@@ -1346,13 +1782,16 @@ with col_main:
                 })
             st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
 
-            st.markdown("---")
-            st.markdown("### 🔍 Interactive Station Reading-by-Reading Drilldown")
-            st.caption("Inspect the exact physical thermometer readings hour-by-hour and see how our model eliminates errors against coarse reanalysis.")
+            st.markdown("""<div style="height: 16px;"></div>""", unsafe_allow_html=True)
+            st.markdown("""
+            <div class="section-tagline">SENSOR DRILLDOWN // REAL-TIME DISPATCH LOG</div>
+            <div class="section-headline" style="font-size: 16px;">PHYSICAL THERMOMETER OBSERVATION SERIES</div>
+            <div class="section-description">Reading-by-reading telemetry tracking error divergence between coarse reanalysis and high-resolution model output.</div>
+            """, unsafe_allow_html=True)
 
             station_names = [s["station_name"] for s in stations_bench]
             selected_stn_name = st.selectbox(
-                "Select Physical Ground Station to Inspect",
+                "SELECT PHYSICAL GROUND SENSOR:",
                 station_names,
                 index=station_names.index("Mangalore Station (Panambur/Coast)") if "Mangalore Station (Panambur/Coast)" in station_names else 0
             )
@@ -1360,16 +1799,20 @@ with col_main:
             curr_s = next((s for s in stations_bench if s["station_name"] == selected_stn_name), stations_bench[0])
 
             context_notes = {
-                "Shimla Station (Himachal Alps)": "🏔️ **Ridge Thermal Belt & Urban Core (2,202m):** Standard lapse-rate formulas overcooled this ridge by assuming high altitudes are cold. Our 16-channel engine integrates the +3.5°C Urban Heat Island & daytime insolation along the Mall Road ridge, slashing error by **52.3%**!",
-                "Mangalore Station (Panambur/Coast)": "🌊 **Arabian Sea Maritime Regulation (31m):** Sea surface thermal inertia locks coastal air into a narrow 4°C band (28°C–32°C). While the near-zero variance dampens Pearson correlation (0.336), our model achieves an ultra-accurate **1.16°C MAE (tied for lowest error in India)** and **+25.8% error reduction** over coarse reanalysis!",
-                "Agra Observatory (Kheria)": "🏛️ **Indo-Gangetic Alluvial Plain (168m):** Intense sensible surface heating during May summer heatwaves. Our model accounts for dry boundary layer convection and urban built-up storage, cutting error from 2.46°C to **1.16°C (+53.0% improvement)**!",
-                "Bangalore Observatory (HAL)": "🌆 **High Urban Granitic Plateau (921m):** Captures urban concrete heat storage across the Deccan plateau, improving over both coarse NWP and standard elevation models.",
-                "Kullu-Manali Station (Bhuntar)": "⛰️ **Deep Mountain Valley (1,089m):** Cold-air drainage pools in the Beas river basin under calm night winds, reproducing textbook valley microclimates.",
-                "Mysore Observatory": "🌾 **Undulating Plateau Basin (767m):** Resolves terrain rolling relief between the Western Ghats foothills and the southern plateau."
+                "Shimla Station (Himachal Alps)": "Ridge Thermal Belt & Urban Core (2,202m): Standard lapse-rate formulas overcooled this ridge by assuming high altitudes are cold. Our 16-channel engine integrates the +3.5°C Urban Heat Island & daytime insolation along the Mall Road ridge, slashing error by 52.3%!",
+                "Mangalore Station (Panambur/Coast)": "Arabian Sea Maritime Regulation (31m): Sea surface thermal inertia locks coastal air into a narrow 4°C band (28°C–32°C). While the near-zero variance dampens Pearson correlation (0.336), our model achieves an ultra-accurate 1.16°C MAE (tied for lowest error in India) and +25.8% error reduction over coarse reanalysis!",
+                "Agra Observatory (Kheria)": "Indo-Gangetic Alluvial Plain (168m): Intense sensible surface heating during May summer heatwaves. Our model accounts for dry boundary layer convection and urban built-up storage, cutting error from 2.46°C to 1.16°C (+53.0% improvement)!",
+                "Bangalore Observatory (HAL)": "High Urban Granitic Plateau (921m): Captures urban concrete heat storage across the Deccan plateau, improving over both coarse NWP and standard elevation models.",
+                "Kullu-Manali Station (Bhuntar)": "Deep Mountain Valley (1,089m): Cold-air drainage pools in the Beas river basin under calm night winds, reproducing textbook valley microclimates.",
+                "Mysore Observatory": "Undulating Plateau Basin (767m): Resolves terrain rolling relief between the Western Ghats foothills and the southern plateau."
             }
 
             note_txt = context_notes.get(curr_s["station_name"], "Verified against official NOAA ISD calibrated physical ground thermometers.")
-            st.info(note_txt)
+            st.markdown(f"""
+            <div style="background: var(--surface); border: 1px solid var(--border-hairline); border-left: 2px solid var(--accent); border-radius: 3px; padding: 10px 14px; margin: 10px 0 14px 0; font-family: var(--mono); font-size: 11px; color: var(--text-secondary); line-height: 1.5;">
+              <span style="color: var(--accent); font-weight: 700; text-transform: uppercase;">MICROCLIMATE DYNAMICS: </span>{note_txt}
+            </div>
+            """, unsafe_allow_html=True)
 
             times = curr_s.get("times", [])
             y_t = curr_s.get("y_true", [])
@@ -1382,7 +1825,7 @@ with col_main:
                 for t_str, real_v, mod_v, crs_v, lps_v in zip(times, y_t, p_m, p_c, p_l):
                     err_m = abs(mod_v - real_v)
                     err_c = abs(crs_v - real_v)
-                    status = "🎯 Spot-On (<0.5°C)" if err_m <= 0.5 else ("✔️ Accurate (<1.5°C)" if err_m <= 1.5 else "⚠️ Slight Delta")
+                    status = "HIGH (<0.5°C)" if err_m <= 0.5 else ("ACCURATE (<1.5°C)" if err_m <= 1.5 else "DELTA (>1.5°C)")
                     detail_rows.append({
                         "Timestamp (UTC)": t_str,
                         "Real Thermometer (°C)": f"{real_v:.1f}",
@@ -1397,7 +1840,7 @@ with col_main:
 
                 col_sub1, col_sub2 = st.columns([1, 1])
                 with col_sub1:
-                    st.markdown(f"**📈 Diurnal Tracking: Real Thermometer vs Model ({curr_s['station_name'].split(' (')[0]})**")
+                    st.markdown(f"""<div style="font-family: var(--mono); font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">DIURNAL TRACKING // REAL THERMOMETER VS MODEL ({curr_s['station_name'].split(' (')[0].upper()})</div>""", unsafe_allow_html=True)
                     fig_line = go.Figure()
                     fig_line.add_trace(go.Scatter(
                         x=times, y=y_t, mode="lines+markers", name="Real Thermometer",
@@ -1428,11 +1871,14 @@ with col_main:
                     st.plotly_chart(fig_line, use_container_width=True)
 
                 with col_sub2:
-                    st.markdown("**📋 Sensor-by-Sensor Readings Log**")
+                    st.markdown("""<div style="font-family: var(--mono); font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">OBSERVATION LOG // SENSOR-BY-SENSOR READINGS</div>""", unsafe_allow_html=True)
                     st.dataframe(df_readings, use_container_width=True, height=380, hide_index=True)
 
-            st.markdown("---")
-            st.markdown("### 📊 Cross-Station Meteorological Summary")
+            st.markdown("""<div style="height: 16px;"></div>""", unsafe_allow_html=True)
+            st.markdown("""
+            <div class="section-tagline">METEOROLOGICAL REPORT // MULTI-SENSOR BENCHMARK</div>
+            <div class="section-headline" style="font-size: 16px;">CROSS-STATION ACCURACY SUMMARY</div>
+            """, unsafe_allow_html=True)
             img_chart = ROOT_DIR / "Images" / "ground_station_comparison.png"
             if img_chart.exists():
                 st.image(str(img_chart), caption="Multi-Station Physical Sensor Benchmark Comparison (SIH 2026)", use_container_width=True)
@@ -1448,53 +1894,63 @@ with col_main:
 if col_right_slidebar is not None:
     with col_right_slidebar:
         st.markdown("""
-        <div style="background: linear-gradient(135deg, #091322 0%, #1e293b 100%); border-radius: 14px; padding: 16px 18px; border: 2px solid #38bdf8; box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-bottom: 12px;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-size: 16px; font-weight: 800; color: #f8fafc;">🤖 GramVayu AI Advisor</span>
-            <span style="background: #10b981; color: white; font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 8px;">LIVE 1KM</span>
+        <div class="terminal-header">
+          <div class="terminal-title">
+            <span>METEOROLOGICAL TERMINAL</span>
+            <span style="font-size: 9px; padding: 2px 6px; background: rgba(255, 74, 28, 0.15); color: var(--accent); border: 1px solid var(--accent); border-radius: 2px;">LIVE TELEMETRY</span>
           </div>
-          <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">1km physics telemetry & agro-meteorological advisory channel</div>
+          <div class="terminal-subtitle">1KM RESATTNUNET ADVISORY & REASONING ENGINE</div>
         </div>
         """, unsafe_allow_html=True)
 
         # Header controls
         c_r1, c_r2 = st.columns([1.8, 1.2])
         with c_r1:
-            st.caption(f"📍 **Focus:** {curr_p.get('panchayat_name')[:18]} ({curr_p.get('elevation_m')}m)")
+            st.markdown(f"""<div style="font-family: var(--mono); font-size: 10px; color: var(--text-secondary); padding-top: 6px;">FOCUS: <b style="color: var(--text-primary);">{curr_p.get('panchayat_name')[:16].upper()} [{curr_p.get('elevation_m')}M]</b></div>""", unsafe_allow_html=True)
         with c_r2:
-            if st.button("✕ Close", key="close_right_ai_panel_btn", use_container_width=True):
+            if st.button("✕ CLOSE", key="close_right_ai_panel_btn", use_container_width=True):
                 st.session_state.show_ai_right_panel = False
                 st.rerun()
 
         # Telemetry Quick Context Box
         st.markdown(f"""
-        <div style="background: rgba(15, 23, 42, 0.7); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; font-size: 11px; color: #cbd5e1; border: 1px solid #334155;">
-          🌡️ <b>Temp:</b> {w_s.get('temp_mean_c', 20.0):.1f}°C &nbsp;|&nbsp; 💧 <b>RH:</b> {w_s.get('relative_humidity_pct', 65)}%<br/>
-          💨 <b>Wind:</b> {w_s.get('wind_speed_kmh', 8.0):.1f} km/h &nbsp;|&nbsp; ☀️ <b>Irrigation:</b> {p_water_l:,} L/ha
+        <div style="background: var(--surface); border: 1px solid var(--border-hairline); border-radius: 3px; padding: 10px 12px; margin-bottom: 10px; font-family: var(--mono); font-size: 11px; color: var(--text-secondary);">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <span>TEMP: <b style="color: var(--text-primary);">{w_s.get('temp_mean_c', 20.0):.1f}°C</b></span>
+            <span>RH: <b style="color: var(--text-primary);">{w_s.get('relative_humidity_pct', 65)}%</b></span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>WIND: <b style="color: var(--text-primary);">{w_s.get('wind_speed_kmh', 8.0):.1f} km/h</b></span>
+            <span>WATER: <b style="color: var(--text-primary);">{p_water_l:,} L/ha</b></span>
+          </div>
         </div>
         """, unsafe_allow_html=True)
 
         # Quick Inquiries chips
-        st.markdown("<div style='font-size: 11px; font-weight: 600; color: #94a3b8; margin: 4px 0 2px 0;'>Suggested Inquiries:</div>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style="font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); margin: 6px 0 4px 0;">
+            DISPATCH QUERY MACROS:
+        </div>
+        """, unsafe_allow_html=True)
         q1, q2 = st.columns(2)
         side_quick_prompt = None
         with q1:
-            if st.button("❄️ Coldest GP", use_container_width=True, key="rq_cold"):
+            if st.button("[ COLD DRAINAGE ]", use_container_width=True, key="rq_cold"):
                 side_quick_prompt = "Which panchayat is the coldest, and what are the valley cold-air pooling and frost risks?"
-            if st.button("🌧️ Rain & Storm", use_container_width=True, key="rq_rain"):
+            if st.button("[ PRECIPITATION ]", use_container_width=True, key="rq_rain"):
                 side_quick_prompt = "Is it raining today, and what is the orographic precipitation forecast?"
-            if st.button("🌱 Sowing Advice", use_container_width=True, key="rq_sow"):
+            if st.button("[ SOWING WINDOW ]", use_container_width=True, key="rq_sow"):
                 side_quick_prompt = "Can farmers sow seeds today, and what are the soil temperature and moisture conditions?"
-            if st.button("🏛️ Circular", use_container_width=True, key="rq_circ"):
+            if st.button("[ ADVISORY DRAFT ]", use_container_width=True, key="rq_circ"):
                 side_quick_prompt = "Draft an official Gram Panchayat advisory circular based on current microclimate relief."
         with q2:
-            if st.button("💧 Irrigation (L/ha)", use_container_width=True, key="rq_water"):
+            if st.button("[ WATER BUDGET ]", use_container_width=True, key="rq_water"):
                 side_quick_prompt = "Which panchayat has highest irrigation water demand (L/ha) and what is the recommended schedule?"
-            if st.button("🚜 Spray Window", use_container_width=True, key="rq_spray"):
+            if st.button("[ SPRAY TIMING ]", use_container_width=True, key="rq_spray"):
                 side_quick_prompt = "What is the precision agrochemical spraying window considering current topographic winds?"
-            if st.button("🔬 Why 1km vs 10km?", use_container_width=True, key="rq_why1km"):
+            if st.button("[ 1KM VS 10KM ]", use_container_width=True, key="rq_why1km"):
                 side_quick_prompt = "Why is 1km resolution better than 10km or 30km regional models like IMD and ERA5?"
-            if st.button("🧹 Clear Chat", use_container_width=True, key="rq_clear"):
+            if st.button("[ RESET BUFFER ]", use_container_width=True, key="rq_clear"):
                 st.session_state.agent_messages = []
                 st.rerun()
 
@@ -1504,12 +1960,12 @@ if col_right_slidebar is not None:
             for msg in st.session_state.agent_messages:
                 with st.chat_message(msg["role"]):
                     if msg.get("tools"):
-                        tool_tags = " ".join([f"`🛠️ {t}`" for t in msg["tools"]])
-                        st.caption(f"Executed tools: {tool_tags}")
+                        tool_tags = " ".join([f"`{t}`" for t in msg["tools"]])
+                        st.caption(f"TELEMETRY EXECUTED: {tool_tags}")
                     st.markdown(msg["content"])
 
         # Chat Input Field
-        right_user_in = st.chat_input("Ask GramVayu AI (e.g. 'will it rain?', 'why 1km?', 'coffee spray window')...", key="right_side_chat_in")
+        right_user_in = st.chat_input("Input operational inquiry or command (e.g. 'precipitation risk', 'spray window')...", key="right_side_chat_in")
         active_prompt = side_quick_prompt or right_user_in
 
         if active_prompt:
@@ -1521,8 +1977,8 @@ if col_right_slidebar is not None:
                     with st.spinner("Evaluating physics telemetry..."):
                         reply_out, tools_out = query_agent(active_prompt)
                         if tools_out:
-                            tool_tags = " ".join([f"`🛠️ {t}`" for t in tools_out])
-                            st.caption(f"Executed tools: {tool_tags}")
+                            tool_tags = " ".join([f"`{t}`" for t in tools_out])
+                            st.caption(f"TELEMETRY EXECUTED: {tool_tags}")
                         st.markdown(reply_out)
 
             st.session_state.agent_messages.append({

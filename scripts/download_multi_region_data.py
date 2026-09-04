@@ -229,10 +229,11 @@ def download_region_dataset(region_key, seasons=("summer", "winter"), quick=Fals
     print(f"Completed acquisition for {region_key} -> {region_dir}")
 
 
-def download_on_demand_region(lat, lon, region_name, box_size_deg=0.9):
+def download_on_demand_region(lat, lon, region_name, box_size_deg=0.9, fetch_era5=False):
     """
     On-demand acquisition for ANY location searched from the UI!
     Centers a bounding box of ~100km x 100km around (lat, lon).
+    Optimized: Skips redundant 1-week ERA5 download during inference, and reuses cached DEM.
     """
     clean_id = "".join(c if c.isalnum() else "_" for c in region_name.lower().strip())
     region_dir = DATA_DIR / clean_id
@@ -244,16 +245,29 @@ def download_on_demand_region(lat, lon, region_name, box_size_deg=0.9):
     west = lon - half
     east = lon + half
 
-    dem_path = region_dir / f"dem_{clean_id}_raw.tif"
-    download_dem_for_bbox(north, west, south, east, dem_path)
-    dem_1km = resample_dem_to_1km(dem_path, region_dir / f"dem_{clean_id}_1km.npy")
+    dem_1km_path = region_dir / f"dem_{clean_id}_1km.npy"
+    if dem_1km_path.exists():
+        dem_1km = np.load(dem_1km_path)
+    else:
+        # Check if master All-India 1km DEM exists for instant in-memory slicing
+        master_dem = DATA_DIR / "india_dem_1km.npy"
+        if master_dem.exists():
+            from scripts.download_india_dem_1km import slice_india_dem
+            dem_1km = slice_india_dem(lat, lon, box_size_deg=box_size_deg, out_shape=(128, 128))
+            np.save(dem_1km_path, dem_1km)
+            print(f"Instantly sliced terrain for {region_name} from master India DEM (shape {dem_1km.shape})")
+        else:
+            dem_path = region_dir / f"dem_{clean_id}_raw.tif"
+            download_dem_for_bbox(north, west, south, east, dem_path)
+            dem_1km = resample_dem_to_1km(dem_path, dem_1km_path)
 
-    # Fetch 1 recent week of ERA5 reanalysis
-    start_date = "2023-05-01"
-    end_date = "2023-05-07"
-    w_data = fetch_multi_variable_era5(north, west, south, east, start_date, end_date)
-    out_npz = region_dir / f"era5_{clean_id}_summer.npz"
-    np.savez(out_npz, **w_data)
+    # Optional: only fetch historical week if explicitly requested (e.g. for offline training)
+    if fetch_era5:
+        start_date = "2023-05-01"
+        end_date = "2023-05-07"
+        w_data = fetch_multi_variable_era5(north, west, south, east, start_date, end_date)
+        out_npz = region_dir / f"era5_{clean_id}_summer.npz"
+        np.savez(out_npz, **w_data)
 
     meta = {
         "region_key": clean_id,

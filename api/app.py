@@ -139,6 +139,9 @@ class OnDemandRequest(BaseModel):
     name: str = Field(..., description="Location name, e.g. 'Shimla' or 'Darjeeling'")
     latitude: float = Field(..., description="Latitude coordinate")
     longitude: float = Field(..., description="Longitude coordinate")
+    mode: str = Field(default="live", description="'live' or 'archive'")
+    date: str = Field(default="2023-05-15", description="Historical date YYYY-MM-DD")
+    time_slot: str = Field(default="12:00", description="Time slot e.g. '12:00'")
 
 
 class AgentChatRequest(BaseModel):
@@ -190,11 +193,20 @@ def search_location(query: str = Query(..., min_length=2, description="City, dis
 # ---------------------------------------------------------
 # 6. LIVE METEOROLOGICAL DATA INGESTION (16 Channels)
 # ---------------------------------------------------------
+_LIVE_WEATHER_CACHE = {}
+
 def fetch_live_meteorology(bbox):
     """
     Fetches real-time synoptic weather (temperature, pressure, wind vectors, humidity)
-    from Open-Meteo across the bounding box.
+    from Open-Meteo across the bounding box with 5-minute memory caching.
     """
+    cache_key = tuple(round(float(b), 3) for b in bbox)
+    now = datetime.datetime.now()
+    if cache_key in _LIVE_WEATHER_CACHE:
+        cached_time, cached_val = _LIVE_WEATHER_CACHE[cache_key]
+        if (now - cached_time).total_seconds() < 300:
+            return cached_val
+
     north, west, south, east = bbox
     url = (
         f"https://api.open-meteo.com/v1/forecast?"
@@ -213,7 +225,6 @@ def fetch_live_meteorology(bbox):
     w_dir = [d["current"].get("wind_direction_10m", 180.0) for d in data]
 
     # Convert speed & direction to u & v wind vectors
-    # u = -spd * sin(dir * pi / 180), v = -spd * cos(dir * pi / 180)
     u_list, v_list = [], []
     for s, d in zip(w_spd, w_dir):
         rad = np.radians(d)
@@ -239,7 +250,82 @@ def fetch_live_meteorology(bbox):
         "mean_wind_speed_kmh": float(np.mean(w_spd)),
         "mean_relative_humidity": float(np.mean(rh))
     }
-    return coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, meta
+    result = (coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, meta)
+    _LIVE_WEATHER_CACHE[cache_key] = (now, result)
+    return result
+
+
+_ARCHIVE_WEATHER_CACHE = {}
+
+def fetch_archive_meteorology(bbox, date_str="2023-05-15", time_slot="12:00"):
+    """
+    Fetches historical synoptic weather from Open-Meteo ERA5 Reanalysis API
+    across the bounding box for any requested historical date with memory caching.
+    """
+    cache_key = (tuple(round(float(b), 3) for b in bbox), date_str, time_slot)
+    now = datetime.datetime.now()
+    if cache_key in _ARCHIVE_WEATHER_CACHE:
+        cached_time, cached_val = _ARCHIVE_WEATHER_CACHE[cache_key]
+        if (now - cached_time).total_seconds() < 3600:
+            return cached_val
+
+    north, west, south, east = bbox
+    url = (
+        f"https://archive-api.open-meteo.com/v1/era5?"
+        f"latitude={north},{north},{south},{south}&longitude={west},{east},{west},{east}"
+        f"&start_date={date_str}&end_date={date_str}"
+        f"&hourly=temperature_2m,surface_pressure,relative_humidity_2m,wind_speed_10m,wind_direction_10m"
+    )
+    resp = requests.get(url, timeout=15)
+    if resp.status_code != 200:
+        raise RuntimeError(f"Open-Meteo ERA5 archive API error ({resp.status_code}): {resp.text}")
+
+    data = resp.json()
+    if not isinstance(data, list):
+        data = [data]
+
+    try:
+        hr = int(time_slot.split(":")[0])
+    except Exception:
+        hr = 12
+
+    temps, press, rh, w_spd, w_dir = [], [], [], [], []
+    for d in data:
+        hourly = d.get("hourly", {})
+        idx = min(hr, len(hourly.get("temperature_2m", [])) - 1)
+        temps.append(hourly.get("temperature_2m", [25.0])[idx])
+        press.append(hourly.get("surface_pressure", [1000.0])[idx])
+        rh.append(hourly.get("relative_humidity_2m", [60.0])[idx])
+        w_spd.append(hourly.get("wind_speed_10m", [8.0])[idx])
+        w_dir.append(hourly.get("wind_direction_10m", [180.0])[idx])
+
+    u_list, v_list = [], []
+    for s, d in zip(w_spd, w_dir):
+        rad = np.radians(d)
+        u_list.append(-s * np.sin(rad))
+        v_list.append(-s * np.cos(rad))
+
+    def to_128(arr_4):
+        g = np.array([[arr_4[0], arr_4[1]], [arr_4[2], arr_4[3]]], dtype=np.float32)
+        return zoom(g, (64, 64), order=1).astype(np.float32)
+
+    coarse_t = to_128(temps)
+    coarse_p = to_128(press)
+    coarse_rh = to_128(rh)
+    coarse_u = to_128(u_list)
+    coarse_v = to_128(v_list)
+    coarse_spd = to_128(w_spd)
+
+    meta = {
+        "live_time": f"Historical ERA5: {date_str} {time_slot}",
+        "mean_temp_c": float(np.mean(temps)),
+        "mean_pressure_hpa": float(np.mean(press)),
+        "mean_wind_speed_kmh": float(np.mean(w_spd)),
+        "mean_relative_humidity": float(np.mean(rh))
+    }
+    result = (coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, meta)
+    _ARCHIVE_WEATHER_CACHE[cache_key] = (now, result)
+    return result
 
 
 # ---------------------------------------------------------
@@ -247,6 +333,10 @@ def fetch_live_meteorology(bbox):
 # ---------------------------------------------------------
 def run_downscale_inference(dem_raw, bbox, coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, region_name=""):
     """Constructs 16-channel normalized tensor and executes ResAttnUNet prediction."""
+    global model, stats
+    if model is None or stats is None:
+        load_model_and_stats()
+
     north, west, south, east = bbox
     lat_grid = np.linspace(north, south, 128, dtype=np.float32)[:, None].repeat(128, axis=1)
     lon_grid = np.linspace(west, east, 128, dtype=np.float32)[None, :].repeat(128, axis=0)
@@ -472,14 +562,17 @@ def get_metadata():
 def on_demand_downscale(req: OnDemandRequest):
     """
     On-Demand Ingestion & Downscaling for ANY Searched Location.
-    Downloads DEM automatically if not cached, ingests live weather, and returns 1km predictions.
+    Downloads DEM automatically if not cached, ingests live or historical archive weather, and returns 1km predictions.
     """
     try:
-        clean_id, dem_1km, meta = download_on_demand_region(req.latitude, req.longitude, req.name)
+        clean_id, dem_1km, meta = download_on_demand_region(req.latitude, req.longitude, req.name, fetch_era5=False)
         bbox = meta["bbox"]
 
-        # Ingest live weather across the newly acquired bounding box
-        coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, weather_meta = fetch_live_meteorology(bbox)
+        # Ingest weather
+        if req.mode == "live":
+            coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, weather_meta = fetch_live_meteorology(bbox)
+        else:
+            coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, weather_meta = fetch_archive_meteorology(bbox, req.date, req.time_slot)
 
         # Execute downscaling
         out = run_downscale_inference(dem_1km, bbox, coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, region_name=req.name)
@@ -525,9 +618,18 @@ def on_demand_downscale(req: OnDemandRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+_PREDICT_CACHE = {}
+
 @app.post("/api/v1/predict")
 def predict(req: DownscaleRequest):
-    """Executes downscaling for preset anchor regions."""
+    """Executes downscaling for preset anchor regions with 5-minute memory caching."""
+    cache_key = (req.region.lower(), req.mode, req.date, req.time_slot)
+    now = datetime.datetime.now()
+    if cache_key in _PREDICT_CACHE:
+        cached_time, cached_res = _PREDICT_CACHE[cache_key]
+        if (now - cached_time).total_seconds() < 300:
+            return cached_res
+
     try:
         region = req.region.lower()
         if region not in REGIONS:
@@ -548,28 +650,29 @@ def predict(req: DownscaleRequest):
         if req.mode == "live":
             coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, weather_meta = fetch_live_meteorology(bbox)
         else:
-            # Load archive
-            season = "winter" if "01" in req.date else "summer"
+            # Check if matching seasonal npz exists, otherwise query real-time ERA5 archive
+            season = "winter" if "-01-" in req.date else ("monsoon" if "-07-" in req.date else ("post_monsoon" if "-10-" in req.date else "summer"))
             npz_path = region_dir / f"era5_{region}_{season}.npz"
-            if not npz_path.exists():
-                npz_path = list(region_dir.glob("era5_*_*.npz"))[0]
-            arc = np.load(npz_path)
-            t_idx = min(12, arc["temperature_2m"].shape[0] - 1)
-            zy = 128 / arc["temperature_2m"][t_idx].shape[0]
-            zx = 128 / arc["temperature_2m"][t_idx].shape[1]
-            coarse_t = zoom(arc["temperature_2m"][t_idx], (zy, zx), order=1).astype(np.float32)
-            coarse_p = zoom(arc["surface_pressure"][t_idx], (zy, zx), order=1).astype(np.float32)
-            coarse_rh = zoom(arc["relative_humidity_2m"][t_idx], (zy, zx), order=1).astype(np.float32)
-            coarse_u = zoom(arc["wind_u_10m"][t_idx], (zy, zx), order=1).astype(np.float32)
-            coarse_v = zoom(arc["wind_v_10m"][t_idx], (zy, zx), order=1).astype(np.float32)
-            coarse_spd = zoom(arc["wind_speed_10m"][t_idx], (zy, zx), order=1).astype(np.float32)
-            weather_meta = {
-                "live_time": f"Historical Archive: {req.date} {req.time_slot}",
-                "mean_temp_c": float(np.mean(coarse_t)),
-                "mean_pressure_hpa": float(np.mean(coarse_p)),
-                "mean_wind_speed_kmh": float(np.mean(coarse_spd)),
-                "mean_relative_humidity": float(np.mean(coarse_rh))
-            }
+            if npz_path.exists():
+                arc = np.load(npz_path)
+                t_idx = min(12, arc["temperature_2m"].shape[0] - 1)
+                zy = 128 / arc["temperature_2m"][t_idx].shape[0]
+                zx = 128 / arc["temperature_2m"][t_idx].shape[1]
+                coarse_t = zoom(arc["temperature_2m"][t_idx], (zy, zx), order=1).astype(np.float32)
+                coarse_p = zoom(arc["surface_pressure"][t_idx], (zy, zx), order=1).astype(np.float32)
+                coarse_rh = zoom(arc["relative_humidity_2m"][t_idx], (zy, zx), order=1).astype(np.float32)
+                coarse_u = zoom(arc["wind_u_10m"][t_idx], (zy, zx), order=1).astype(np.float32)
+                coarse_v = zoom(arc["wind_v_10m"][t_idx], (zy, zx), order=1).astype(np.float32)
+                coarse_spd = zoom(arc["wind_speed_10m"][t_idx], (zy, zx), order=1).astype(np.float32)
+                weather_meta = {
+                    "live_time": f"Historical Archive ({season.capitalize()}): {req.date} {req.time_slot}",
+                    "mean_temp_c": float(np.mean(coarse_t)),
+                    "mean_pressure_hpa": float(np.mean(coarse_p)),
+                    "mean_wind_speed_kmh": float(np.mean(coarse_spd)),
+                    "mean_relative_humidity": float(np.mean(coarse_rh))
+                }
+            else:
+                coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, weather_meta = fetch_archive_meteorology(bbox, req.date, req.time_slot)
 
         # Run inference
         out = run_downscale_inference(dem_raw, bbox, coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, region_name=region)
@@ -582,7 +685,7 @@ def predict(req: DownscaleRequest):
 
         panchayats = build_panchayat_bulletins(region, region_info["name"].split(" (")[0], bbox, final_t, final_rh, final_wind, final_precip, final_et0, dem_m)
 
-        return {
+        res = {
             "status": "success",
             "region": region,
             "region_name": region_info["name"],
@@ -610,6 +713,8 @@ def predict(req: DownscaleRequest):
             "coarse_grid": coarse_t[::2, ::2].tolist(),
             "elevation_grid": dem_m[::2, ::2].tolist()
         }
+        _PREDICT_CACHE[cache_key] = (now, res)
+        return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -7,3 +7,10 @@ __pycache__
 .idea
 .vscode
 .DS_Store
+scratch/
+data/*.npz
+data/**/*.tif
+data/**/*.nc
+data/training_dataset_*.npz
+data/india_boundary.geojson
+Images/*.png

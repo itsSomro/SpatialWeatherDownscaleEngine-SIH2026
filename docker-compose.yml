@@ -1,12 +1,18 @@
 version: "3.8"
 
 services:
-  downscaler-app:
-    build: .
+  downscaler:
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: spatial_weather_downscaler
     ports:
       - "8000:8000"
       - "8501:8501"
     environment:
       - PYTHONUNBUFFERED=1
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      # Mount data folder so models, checkpoints, and cached DEMs persist
+      - ./data:/app/data
     restart: unless-stopped

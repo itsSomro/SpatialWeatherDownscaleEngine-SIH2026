@@ -36,6 +36,45 @@ def _generate_offline_advisory(telemetry: Dict[str, Any], prompt: str) -> str:
 
     prompt_lower = prompt.lower()
 
+    # 0. External Village or Region Query (e.g. Pune, Nashik, Darjeeling, etc.)
+    from ai_agent.tools import extract_location_from_query, lookup_external_region_weather
+    ext_target = extract_location_from_query(prompt)
+    if ext_target and ext_target.lower() not in region_name.lower():
+        ext_data = lookup_external_region_weather(ext_target)
+        if ext_data:
+            t_c = ext_data["temp_c"]
+            rh_val = ext_data["relative_humidity_pct"]
+            w_spd = ext_data["wind_speed_kmh"]
+            et0_v = ext_data["et0_mm"]
+            l_ha = ext_data["irrigation_l_ha"]
+            loc_n = ext_data["location_name"]
+            adm_n = ext_data["admin1"]
+            el_m = ext_data["elevation_m"]
+            is_spray_safe = w_spd <= 12.0
+            is_blight_risk = rh_val >= 80.0
+
+            return f"""### 🌾 GRAMVAYU MICROCLIMATE INTELLIGENCE: {loc_n.upper()}, {adm_n.upper()}
+**Location Identified:** **{loc_n}, {adm_n} ({ext_data.get('country', 'India')})** | **Elevation:** **{el_m:.0f}m**  
+**Atmospheric Intelligence:** Live 1km Meteorological Analysis & Village Advisories
+
+---
+
+#### ⛅ Current Weather Telemetry in {loc_n}:
+- 🌡️ **Temperature:** **{t_c:.1f}°C** (Diurnal Range: **{ext_data['temp_min_c']:.1f}°C** to **{ext_data['temp_max_c']:.1f}°C**)
+- 💧 **Relative Humidity:** **{rh_val:.0f}%**
+- 💨 **Surface Wind Speed:** **{w_spd:.1f} km/h**
+- 🌧️ **Precipitation:** **{ext_data['precipitation_mm']:.1f} mm**
+- ☀️ **Soil Water Loss ($ET_0$):** **{et0_v:.1f} mm/day** (Irrigation Need: **{l_ha:,} L/ha**)
+
+#### 🚜 Agricultural Advisories for Villages in {loc_n} Region:
+1. **Soil Moisture & Irrigation:** Today's crop transpiration loss is **{et0_v:.1f} mm**. For field crops (sugarcane, onions, pulses, horticulture), run drip lines for ~**{round(et0_v * 0.8, 1)} to {round(et0_v * 1.1, 1)} hours** in the early morning.
+2. **Precision Spray Window:** Surface wind speed of **{w_spd:.1f} km/h** {'is calm — safe for foliar and pesticide spraying until 11:00 AM.' if is_spray_safe else 'exceeds 12 km/h — postpone chemical spraying to prevent droplet drift into non-target fields.'}
+3. **Crop Disease & Blight Risk:** With **{rh_val:.0f}% RH**, fungal spore pressure is {'🔴 **Elevated** — inspect lower leaves for downy mildew / blight.' if is_blight_risk else '🟢 **Low** — dry ambient air suppresses fungal spore germination.'}
+4. **Livestock Comfort:** Dairy cattle and poultry are comfortable in ambient temperatures of **{t_c:.1f}°C**. Ensure clean drinking water.
+
+*Tip: You can also inspect this entire region on our 1km Downscaled Map by searching for "{loc_n}" in the sidebar!*
+"""
+
     # 1. Circular / Administrative action
     if any(w in prompt_lower for w in ["circular", "official", "admin", "panchayat action", "officer", "directive"]):
         return f"""### 🏛️ OFFICIAL GRAM PANCHAYAT ADVISORY DIRECTIVE

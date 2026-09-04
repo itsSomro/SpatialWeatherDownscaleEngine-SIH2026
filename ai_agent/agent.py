@@ -11,6 +11,8 @@ from ai_agent.tools import (
     highest_irrigation_demand_panchayat,
     list_panchayats,
     get_panchayat,
+    extract_location_from_query,
+    lookup_external_region_weather,
 )
 
 
@@ -58,7 +60,7 @@ def _dispatch_tools(user_input: str, telemetry: Optional[Dict[str, Any]]) -> Lis
                 "result": res
             })
 
-    # Tool 5: Specific Panchayat lookup
+    # Tool 5: Specific Panchayat lookup in active region
     for p in telemetry.get("panchayats", []):
         p_name = p.get("panchayat_name", "")
         if p_name and p_name.lower() in q_lower:
@@ -68,6 +70,18 @@ def _dispatch_tools(user_input: str, telemetry: Optional[Dict[str, Any]]) -> Lis
                 "result": p
             })
             break
+
+    # Tool 6: External Village / Region Lookup (e.g. Pune, Nashik, Darjeeling, etc.)
+    ext_loc = extract_location_from_query(user_input)
+    current_reg = telemetry.get("region_name", "").lower()
+    if ext_loc and ext_loc.lower() not in current_reg:
+        ext_wx = lookup_external_region_weather(ext_loc)
+        if ext_wx:
+            tools_executed.append({
+                "tool": "lookup_external_region_weather",
+                "location": ext_loc,
+                "result": ext_wx
+            })
 
     return tools_executed
 

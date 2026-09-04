@@ -9,6 +9,12 @@ import matplotlib.colors as mcolors
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+try:
+    import folium
+    from streamlit_folium import st_folium
+    _FOLIUM_AVAILABLE = True
+except ImportError:
+    _FOLIUM_AVAILABLE = False
 
 
 
@@ -137,9 +143,9 @@ with st.sidebar:
     # Mode Selector
     input_source = st.radio(
         "Navigation Mode",
-        ["🌍 Preset Anchor Regions", "🔍 Drop Any Custom Region (Search)"],
+        ["🌍 Preset Anchor Regions", "🗺️ Pan-India Click-to-Pin (Map)", "🔍 Drop Any Custom Region (Search)"],
         index=0,
-        help="Select a calibrated physiographic anchor zone or search any place across India / globe for automatic on-demand acquisition."
+        help="Select a calibrated physiographic anchor zone, click anywhere on the interactive map of India, or search by name."
     )
 
     selected_region_key = "kodagu"
@@ -155,6 +161,37 @@ with st.sidebar:
         )
         op_mode = st.radio("Weather Feed", ["Live Current Forecast", "Seasonal Archive"], index=0)
         mode_val = "live" if "Live" in op_mode else "archive"
+        archive_date = "2023-05-15"
+    elif input_source == "🗺️ Pan-India Click-to-Pin (Map)":
+        st.markdown("**Click Anywhere Across India**")
+        st.caption("Drag, zoom, and tap any location on the map to drop a coordinate pin:")
+
+        if _FOLIUM_AVAILABLE:
+            init_lat = st.session_state.get("pinned_lat", 12.35)
+            init_lon = st.session_state.get("pinned_lon", 75.85)
+            m_pin = folium.Map(location=[init_lat, init_lon], zoom_start=6, tiles="CartoDB dark_matter")
+            folium.Marker(
+                [init_lat, init_lon],
+                tooltip="Active Focus Pin",
+                icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")
+            ).add_to(m_pin)
+            map_click = st_folium(m_pin, width="100%", height=240, returned_objects=["last_clicked"])
+            if map_click and map_click.get("last_clicked"):
+                st.session_state.pinned_lat = round(map_click["last_clicked"]["lat"], 4)
+                st.session_state.pinned_lon = round(map_click["last_clicked"]["lng"], 4)
+        else:
+            st.session_state.pinned_lat = st.number_input("Latitude", value=12.35, format="%.4f")
+            st.session_state.pinned_lon = st.number_input("Longitude", value=75.85, format="%.4f")
+
+        p_lat = st.session_state.get("pinned_lat", 12.35)
+        p_lon = st.session_state.get("pinned_lon", 75.85)
+        st.markdown(f"**Pinned:** `{p_lat:.4f}° N, {p_lon:.4f}° E`")
+        custom_location = {
+            "name": f"Region_{p_lat:.2f}N_{p_lon:.2f}E",
+            "latitude": p_lat,
+            "longitude": p_lon
+        }
+        mode_val = "live"
         archive_date = "2023-05-15"
     else:
         st.markdown("**Drop Any Custom Region**")
@@ -210,7 +247,7 @@ def get_on_demand_data(name, lat, lon):
 # Trigger Downscaling Execution
 with st.spinner("Executing Universal 16-Channel Physics-Guided Downscaling..."):
     try:
-        if input_source == "🔍 Drop Any Custom Region (Search)" and custom_location:
+        if (input_source in ["🔍 Drop Any Custom Region (Search)", "🗺️ Pan-India Click-to-Pin (Map)"]) and custom_location:
             data = get_on_demand_data(custom_location["name"], custom_location["latitude"], custom_location["longitude"])
             is_custom = True
         else:
@@ -336,38 +373,133 @@ with tab_maps:
         st.pyplot(fig3)
 
     st.markdown("---")
-    st.markdown("### 🔎 Interactive 1km Grid Point Inspector (Cursor Hover)")
-    st.caption("Hover over any location in the region grid to read real-time microclimate values (Elevation, Temp, Humidity, Wind, Rain, and ET₀).")
+    st.markdown("### 🗺️ Interactive Geographic Thermal Map & Spatial Inspector")
+    st.caption("Inspect 1km downscaled physical fields draped over real-world geography. Hover over any pixel or Panchayat to view instant microclimate metrics.")
 
-    # Stack multidimensional custom data for hover template
-    hover_custom = np.dstack((elev_arr, downscaled_arr, rh_arr, wind_arr, precip_arr, et0_arr))
-
-    fig_heat = go.Figure(data=go.Heatmap(
-        z=disp_arr,
-        colorscale="RdBu_r" if "Temperature" in var_choice else ("YlGnBu" if "Humidity" in var_choice or "Precipitation" in var_choice else "Viridis"),
-        colorbar=dict(title=unit_lbl),
-        customdata=hover_custom,
-        hovertemplate=(
-            "<b>1km Grid Cell [%{x}, %{y}]</b><br>" +
-            "🏔️ Elevation: %{customdata[0]:.0f} m<br>" +
-            "🌡️ Temperature: %{customdata[1]:.1f} °C<br>" +
-            "💧 Relative Humidity: %{customdata[2]:.0f} %<br>" +
-            "💨 Wind Speed: %{customdata[3]:.1f} km/h<br>" +
-            "🌧️ Precipitation: %{customdata[4]:.1f} mm<br>" +
-            "☀️ FAO-56 ET₀: %{customdata[5]:.1f} mm/day<br>" +
-            "<extra></extra>"
-        )
-    ))
-    fig_heat.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="#1e2530",
-        plot_bgcolor="#151a23",
-        height=480,
-        margin=dict(l=20, r=20, t=30, b=20),
-        xaxis=dict(title="East-West Grid Distance (~1 km/pixel)", showgrid=False),
-        yaxis=dict(title="North-South Grid Distance (~1 km/pixel)", showgrid=False, scaleanchor="x")
+    map_view_type = st.radio(
+        "Thermal Map View Mode:",
+        ["🌍 Real-World Geographic Thermal Map (CartoDB Tiles & Geo-Coordinates)", "📊 2D Pixel Grid Matrix (Cell Index View)"],
+        horizontal=True
     )
-    st.plotly_chart(fig_heat, use_container_width=True)
+
+    if "Real-World" in map_view_type:
+        map_c1, map_c2, map_c3 = st.columns([1.2, 1.2, 2.0])
+        with map_c1:
+            tile_choice = st.selectbox("Basemap Style", ["CartoDB Dark Matter", "OpenStreetMap", "CartoDB Positron"], index=0)
+            map_style_val = "carto-darkmatter" if "Dark" in tile_choice else ("open-street-map" if "Open" in tile_choice else "carto-positron")
+        with map_c2:
+            colorscale_choice = st.selectbox("Thermal Palette", ["Turbo (Thermal Radar)", "Inferno (Infrared Satellite)", "Plasma (High Contrast)", "Coolwarm (Thermal Delta)", "Viridis"], index=0)
+            cs_val = colorscale_choice.split(" ")[0]
+
+        # Compute real coordinates from region bounding box
+        bbox = data.get("bbox", [12.7, 75.5, 12.0, 76.2])
+        north, west, south, east = bbox[0], bbox[1], bbox[2], bbox[3]
+        nrows, ncols = disp_arr.shape
+        lats = np.linspace(north, south, nrows)
+        lons = np.linspace(west, east, ncols)
+        lon_g, lat_g = np.meshgrid(lons, lats)
+        center_lat = (north + south) / 2.0
+        center_lon = (west + east) / 2.0
+
+        hover_custom = np.dstack((elev_arr, downscaled_arr, rh_arr, wind_arr, precip_arr, et0_arr))
+
+        fig_geo = go.Figure()
+
+        # Continuous thermal density field
+        fig_geo.add_trace(go.Densitymap(
+            lat=lat_g.flatten(),
+            lon=lon_g.flatten(),
+            z=disp_arr.flatten(),
+            radius=18,
+            colorscale=cs_val,
+            colorbar=dict(title=unit_lbl),
+            customdata=hover_custom.reshape(-1, 6),
+            hovertemplate=(
+                "<b>📍 1km Microclimate Cell</b><br>" +
+                "🌐 Coordinates: %{lat:.4f}° N, %{lon:.4f}° E<br>" +
+                "🏔️ Elevation: %{customdata[0]:.0f} m<br>" +
+                "🌡️ Temperature: %{customdata[1]:.1f} °C<br>" +
+                "💧 Relative Humidity: %{customdata[2]:.0f} %<br>" +
+                "💨 Wind Speed: %{customdata[3]:.1f} km/h<br>" +
+                "🌧️ Precipitation: %{customdata[4]:.1f} mm<br>" +
+                "☀️ FAO-56 ET₀: %{customdata[5]:.1f} mm/day<br>" +
+                "<extra></extra>"
+            )
+        ))
+
+        # Overlaid Gram Panchayat markers
+        panchayats = data.get("panchayats", [])
+        if panchayats:
+            p_lats, p_lons, p_names, p_texts = [], [], [], []
+            lat_offsets = [0.25, 0.50, 0.75, 0.60]
+            lon_offsets = [0.35, 0.50, 0.65, 0.25]
+
+            for i, p in enumerate(panchayats):
+                p_lat = south + (north - south) * lat_offsets[i % 4]
+                p_lon = west + (east - west) * lon_offsets[i % 4]
+                p_lats.append(p_lat)
+                p_lons.append(p_lon)
+                p_names.append(p.get("panchayat_name", f"Panchayat {i+1}"))
+                w_s = p.get("weather_summary", {})
+                adv = p.get("advisories", {})
+                p_texts.append(
+                    f"<b>🏛️ {p.get('panchayat_name')}</b><br>" +
+                    f"🏔️ Elevation: {p.get('elevation_m', 500)}m<br>" +
+                    f"🌡️ Temp Range: {w_s.get('temp_min_c', 16.0):.1f}°C – {w_s.get('temp_max_c', 26.0):.1f}°C<br>" +
+                    f"💧 Moisture: {w_s.get('relative_humidity_pct', 65)}% | 💨 Wind: {w_s.get('wind_speed_kmh', 10.0):.1f} km/h<br>" +
+                    f"☀️ Irrigation Demand: {w_s.get('irrigation_demand_liters_ha', 30000):,} L/ha<br>" +
+                    f"🛡️ Spray Window: {adv.get('spray_window', {}).get('badge', '🟢 Optimal')}<br>" +
+                    f"❄️ Frost Risk: {adv.get('frost', {}).get('badge', '🟢 Safe')}<extra></extra>"
+                )
+
+            fig_geo.add_trace(go.Scattermap(
+                lat=p_lats,
+                lon=p_lons,
+                mode="markers+text",
+                marker=dict(size=14, color="#ffffff"),
+                text=p_names,
+                textposition="top right",
+                hovertemplate="%{customdata}<extra></extra>",
+                customdata=p_texts
+            ))
+
+        fig_geo.update_layout(
+            map_style=map_style_val,
+            map_center=dict(lat=center_lat, lon=center_lon),
+            map_zoom=8.5,
+            height=580,
+            margin=dict(l=0, r=0, t=10, b=10)
+        )
+        st.plotly_chart(fig_geo, use_container_width=True)
+    else:
+        # 2D Grid Cell Matrix Inspector
+        hover_custom = np.dstack((elev_arr, downscaled_arr, rh_arr, wind_arr, precip_arr, et0_arr))
+        fig_heat = go.Figure(data=go.Heatmap(
+            z=disp_arr,
+            colorscale="RdBu_r" if "Temperature" in var_choice else ("YlGnBu" if "Humidity" in var_choice or "Precipitation" in var_choice else "Viridis"),
+            colorbar=dict(title=unit_lbl),
+            customdata=hover_custom,
+            hovertemplate=(
+                "<b>1km Grid Cell [%{x}, %{y}]</b><br>" +
+                "🏔️ Elevation: %{customdata[0]:.0f} m<br>" +
+                "🌡️ Temperature: %{customdata[1]:.1f} °C<br>" +
+                "💧 Relative Humidity: %{customdata[2]:.0f} %<br>" +
+                "💨 Wind Speed: %{customdata[3]:.1f} km/h<br>" +
+                "🌧️ Precipitation: %{customdata[4]:.1f} mm<br>" +
+                "☀️ FAO-56 ET₀: %{customdata[5]:.1f} mm/day<br>" +
+                "<extra></extra>"
+            )
+        ))
+        fig_heat.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="#1e2530",
+            plot_bgcolor="#151a23",
+            height=480,
+            margin=dict(l=20, r=20, t=30, b=20),
+            xaxis=dict(title="East-West Grid Distance (~1 km/pixel)", showgrid=False),
+            yaxis=dict(title="North-South Grid Distance (~1 km/pixel)", showgrid=False, scaleanchor="x")
+        )
+        st.plotly_chart(fig_heat, use_container_width=True)
 
 
  

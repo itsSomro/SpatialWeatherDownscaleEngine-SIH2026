@@ -514,6 +514,8 @@ def predict(req: DownscaleRequest):
             "region": region,
             "region_name": region_info["name"],
             "elevation_desc": region_info["elevation_desc"],
+            "bbox": list(bbox),
+            "center": [(bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0],
             "live_meta": weather_meta,
             "metrics": {
                 "min_temp": round(float(final_t.min()), 2),

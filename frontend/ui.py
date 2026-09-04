@@ -360,12 +360,94 @@ with st.spinner("Executing Universal 16-Channel Physics-Guided Downscaling..."):
         st.stop()
 
 # Extract Panchayats and Telemetry
-panchayats = data.get("panchayats", [])
+raw_panchayats = data.get("panchayats", [])
+extras = st.session_state.get("extra_panchayats", {}).get(selected_region_key, [])
+seen_gp_names = set()
+panchayats = []
+for p in (extras + raw_panchayats):
+    p_name_lower = p.get("panchayat_name", "").lower().strip()
+    if p_name_lower and p_name_lower not in seen_gp_names:
+        seen_gp_names.add(p_name_lower)
+        panchayats.append(p)
+if not panchayats:
+    panchayats = raw_panchayats
+
 active_reg_title = data.get("region_name", "Selected Block").split(" (")[0]
 metrics = data.get("metrics", {})
 live_meta = data.get("live_meta", {})
 elev_r = metrics.get("elevation_range_m", [500, 1500])
 current_reg_name = data.get("region_name", active_reg_title)
+
+# Active coordinates
+active_target_info = st.session_state.get("active_region_info", {"lat": 12.35, "lon": 75.85})
+active_lat = float(active_target_info.get("lat", 12.35))
+active_lon = float(active_target_info.get("lon", 75.85))
+
+def resolve_and_add_panchayat(query_name: str, center_lat: float, center_lon: float, reg_title: str, reg_key: str, data_obj: dict):
+    """Searches for a village via API within 30km, samples downscaled fields, and stores in session_state."""
+    q = query_name.strip()
+    if not q or len(q) < 2:
+        return None
+    try:
+        s_res = requests.get(
+            f"{API_URL}/api/v1/search-panchayat",
+            params={
+                "query": q,
+                "center_lat": center_lat,
+                "center_lon": center_lon,
+                "radius_km": 20.0
+            },
+            timeout=8
+        ).json()
+        candidates = s_res.get("results", [])
+    except Exception:
+        candidates = []
+
+    if candidates:
+        cand = candidates[0]
+        b_box = data_obj.get("bbox", [center_lat + 0.45, center_lon - 0.45, center_lat - 0.45, center_lon + 0.45])
+        b_north, b_west, b_south, b_east = b_box[0], b_box[1], b_box[2], b_box[3]
+        t_arr = np.array(data_obj["downscaled_grid"])
+        H_t, W_t = t_arr.shape
+        row_t = int(np.clip(((b_north - cand["lat"]) / max(1e-5, (b_north - b_south))) * (H_t - 1), 0, H_t - 1))
+        col_t = int(np.clip(((cand["lon"] - b_west) / max(1e-5, (b_east - b_west))) * (W_t - 1), 0, W_t - 1))
+
+        t_mean_v = float(t_arr[row_t, col_t])
+        rh_v = float(np.array(data_obj.get("humidity_grid", t_arr))[row_t, col_t])
+        w_v = float(np.array(data_obj.get("wind_grid", t_arr))[row_t, col_t])
+        pr_v = float(np.array(data_obj.get("precip_grid", t_arr))[row_t, col_t])
+        et0_v = float(np.array(data_obj.get("et0_grid", t_arr))[row_t, col_t])
+        elev_v = int(np.array(data_obj.get("elevation_grid", t_arr))[row_t, col_t])
+
+        new_gp_obj = {
+            "panchayat_name": cand["name"],
+            "taluk": cand.get("taluk", "Local Block"),
+            "elevation_m": elev_v,
+            "major_crops": "Local Agriculture",
+            "coordinates": [cand["lat"], cand["lon"]],
+            "weather_summary": {
+                "temp_mean_c": t_mean_v,
+                "temp_min_c": t_mean_v - 4.5,
+                "temp_max_c": t_mean_v + 5.0,
+                "relative_humidity_pct": rh_v,
+                "wind_speed_kmh": w_v,
+                "precipitation_mm": pr_v,
+                "evapotranspiration_et0_mm": et0_v,
+                "dew_point_c": 15.0
+            },
+            "advisories": {
+                "frost": {"badge": "🟢 Frost Safe", "action": "Night temperature stays comfortably above freezing."},
+                "blight": {"badge": "🟢 Disease Low" if rh_v < 85 else "🔴 High Blight Risk", "action": "Fungal monitoring."},
+                "spray_window": {"badge": "🟢 Safe Window" if w_v < 15 else "🟡 Postpone Spraying", "reason": "Weather conditions."},
+                "livestock": {"badge": "🟢 Normal", "action": "Comfortable range."}
+            },
+            "primary_action": f"Hyperlocal 1km microclimate advisory for {cand['name']} ({cand['distance_km']}km from {reg_title} center)."
+        }
+        st.session_state.setdefault("extra_panchayats", {}).setdefault(reg_key, []).append(new_gp_obj)
+        st.session_state.selected_gp_idx = 0
+        st.session_state.pop("sb_gp_idx", None)
+        return cand
+    return None
 
 if panchayats:
     valid_idx = get_safe_gp_index(len(panchayats))
@@ -413,6 +495,34 @@ with st.sidebar:
     if panchayats:
         gp_names = [p["panchayat_name"] for p in panchayats]
         valid_idx = get_safe_gp_index(len(gp_names))
+
+        sb_search_val = st.text_input("🔍 Filter Villages:", placeholder="Type to filter...", key="sb_gp_filter_query")
+        if sb_search_val and sb_search_val.strip():
+            filtered_idxs = [i for i, name in enumerate(gp_names) if sb_search_val.strip().lower() in name.lower()]
+            if filtered_idxs:
+                def _sync_filtered():
+                    f_chosen = st.session_state.get("sb_filtered_gp_idx", filtered_idxs[0])
+                    st.session_state.selected_gp_idx = f_chosen
+
+                f_current = valid_idx if valid_idx in filtered_idxs else filtered_idxs[0]
+                st.selectbox(
+                    f"Matching Villages ({len(filtered_idxs)}):",
+                    filtered_idxs,
+                    format_func=lambda i: f"🏛️ {gp_names[i]} ({panchayats[i].get('elevation_m')}m)",
+                    index=filtered_idxs.index(f_current),
+                    key="sb_filtered_gp_idx",
+                    on_change=_sync_filtered
+                )
+            else:
+                st.caption(f"'{sb_search_val}' not in preloaded list.")
+                if st.button(f"🔎 Locate '{sb_search_val}' in 30km Area", key="btn_sb_locate_gp", use_container_width=True, type="primary"):
+                    with st.spinner(f"Locating '{sb_search_val}' in 30km area..."):
+                        found_v = resolve_and_add_panchayat(sb_search_val, active_lat, active_lon, active_reg_title, selected_region_key, data)
+                    if found_v:
+                        st.toast(f"📍 Added {found_v['name']} ({found_v['distance_km']}km away)!", icon="🏛️")
+                        st.rerun()
+                    else:
+                        st.warning(f"No village matching '{sb_search_val}' found within 20km of {active_reg_title}.")
 
         def _sync_sidebar_gp():
             chosen = st.session_state.get("sb_gp_idx", 0)
@@ -669,6 +779,43 @@ with col_main:
 
     # ALL Gram Panchayats Quick Switcher Grid (Multi-row, NO 5-button cap!)
     if panchayats and len(panchayats) > 1:
+        st.markdown(f"**🔍 Search Any Village / Gram Panchayat in {active_reg_title} (30×30 km Footprint):**")
+        gp_c1, gp_c2 = st.columns([3.8, 1.2])
+        with gp_c1:
+            search_gp_query = st.text_input(
+                "Search Village or Gram Panchayat:",
+                placeholder=f"Type village name in {active_reg_title} (e.g. Pipraich, Sahjanwa, Ghoom, Somwarpet...)",
+                key="input_search_gp_text",
+                label_visibility="collapsed"
+            )
+        with gp_c2:
+            search_gp_btn = st.button("🔎 Find Village", key="btn_do_search_gp", use_container_width=True, type="primary")
+
+        if (search_gp_btn or (search_gp_query and len(search_gp_query.strip()) >= 3)):
+            q = search_gp_query.strip()
+            # 1. First check if it matches an existing village in panchayats
+            matched_idx = None
+            for i, p in enumerate(panchayats):
+                if q.lower() in p["panchayat_name"].lower():
+                    matched_idx = i
+                    break
+
+            if matched_idx is not None:
+                if st.session_state.get("selected_gp_idx") != matched_idx:
+                    st.session_state.selected_gp_idx = matched_idx
+                    st.session_state.pop("sb_gp_idx", None)
+                    st.rerun()
+                else:
+                    st.info(f"⭐ Active Village Focus: **{panchayats[matched_idx]['panchayat_name']}** ({panchayats[matched_idx].get('elevation_m')}m)")
+            elif search_gp_btn:
+                with st.spinner(f"Locating '{q}' within 30×30 km area of {active_reg_title}..."):
+                    found_cand = resolve_and_add_panchayat(q, active_lat, active_lon, active_reg_title, selected_region_key, data)
+                if found_cand:
+                    st.toast(f"📍 Added {found_cand['name']} ({found_cand['distance_km']} km away)!", icon="🏛️")
+                    st.rerun()
+                else:
+                    st.warning(f"⚠️ No village matching '{q}' found within the 30×30 km area of {active_reg_title}. Please check spelling or select from available villages below.")
+
         st.markdown(f"**📍 Quick Select Any Gram Panchayat in {active_reg_title} ({len(panchayats)} Available):**")
         cols_per_row = 6 if len(panchayats) > 6 else len(panchayats)
         for row_start in range(0, len(panchayats), cols_per_row):

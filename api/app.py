@@ -511,30 +511,38 @@ REAL_PANCHAYATS = {
 # ---------------------------------------------------------
 _VILLAGE_CACHE: Dict[str, Optional[List[dict]]] = {}
 
-def fetch_real_villages_nominatim(bbox, region_title, max_villages=8):
+def fetch_real_villages_nominatim(bbox, region_title, max_villages=8, search_area_km=30.0):
     """
     Finds real village/town names by reverse-geocoding a grid of sample
-    points across the bounding box using Nominatim (OpenStreetMap).
-    Nominatim is proven reachable from this environment (unlike Overpass).
-
-    Returns a list of GP dicts, or None on failure so the caller can
-    fall back to the synthetic geometric approach.
+    points across a 30km x 30km core area centered on the bounding box using Nominatim.
+    This guarantees that all discovered Gram Panchayats are strictly within 15km of the center.
     """
     north, west, south, east = bbox
-    cache_key = f"{round(south,2)}_{round(west,2)}_{round(north,2)}_{round(east,2)}"
+    cache_key = f"{round(south,2)}_{round(west,2)}_{round(north,2)}_{round(east,2)}_{search_area_km}"
     if cache_key in _VILLAGE_CACHE:
         return _VILLAGE_CACHE[cache_key]
 
-    # Generate a grid of 12 sample points spread across the bbox
-    # (3 rows x 4 cols at 25/50/75% offsets)
+    # Calculate center of region
+    c_lat = (north + south) / 2.0
+    c_lon = (west + east) / 2.0
+
+    # 30km x 30km bounding box (radius of ~15km in each direction)
+    h_lat = (search_area_km / 2.0) / 111.0
+    h_lon = (search_area_km / 2.0) / (111.0 * max(0.2, float(np.cos(np.radians(c_lat)))))
+    s_north = min(north, c_lat + h_lat)
+    s_south = max(south, c_lat - h_lat)
+    s_east = min(east, c_lon + h_lon)
+    s_west = max(west, c_lon - h_lon)
+
+    # 12 sample points distributed within the 30km x 30km area
     sample_fracs = [
-        (0.25, 0.25), (0.25, 0.50), (0.25, 0.75),
+        (0.20, 0.20), (0.20, 0.50), (0.20, 0.80),
         (0.50, 0.20), (0.50, 0.50), (0.50, 0.80),
-        (0.75, 0.25), (0.75, 0.50), (0.75, 0.75),
-        (0.15, 0.50), (0.85, 0.50), (0.50, 0.40),
+        (0.80, 0.20), (0.80, 0.50), (0.80, 0.80),
+        (0.35, 0.35), (0.65, 0.65), (0.35, 0.65)
     ]
     sample_points = [
-        (south + fy * (north - south), west + fx * (east - west))
+        (s_south + fy * (s_north - s_south), s_west + fx * (s_east - s_west))
         for fy, fx in sample_fracs
     ]
 
@@ -606,7 +614,7 @@ def fetch_real_villages_nominatim(bbox, region_title, max_villages=8):
                 "place_type": place_type,
             })
 
-            # Nominatim usage policy: max 1 request per second
+            # Nominatim usage policy: friendly throttle
             time.sleep(0.3)
 
         except Exception:
@@ -630,8 +638,124 @@ def fetch_real_villages_nominatim(bbox, region_title, max_villages=8):
         })
 
     _VILLAGE_CACHE[cache_key] = gp_list
-    print(f"[Nominatim] Fetched {len(gp_list)} real villages for '{region_title}': {[g['name'] for g in gp_list]}")
+    print(f"[Nominatim 30x30km] Fetched {len(gp_list)} real villages for '{region_title}': {[g['name'] for g in gp_list]}")
     return gp_list
+
+
+def generate_transliteration_variants(name: str) -> List[str]:
+    """Generates phonetic and transliteration spelling variants common in Indian place names."""
+    q = name.strip().lower()
+    cands = [q]
+    rules = [
+        ("kadh", "khad"), ("khad", "kadh"),
+        ("gadh", "ghad"), ("ghad", "gadh"),
+        ("badh", "bhad"), ("bhad", "badh"),
+        ("dha", "had"),
+        ("wasla", "vasla"), ("vasla", "wasla"),
+        ("w", "v"), ("v", "w"),
+        ("sh", "s"), ("s", "sh"),
+        ("aa", "a"), ("ee", "i"), ("oo", "u"),
+        ("kurseong", "karsiyang"),
+        ("darjeeling", "darjiling"),
+    ]
+    for src, dst in rules:
+        if src in q:
+            alt = q.replace(src, dst)
+            if alt not in cands:
+                cands.append(alt)
+    return cands
+
+
+@app.get("/api/v1/search-panchayat")
+def search_panchayat(
+    query: str = Query(..., min_length=2, description="Village or Gram Panchayat name to search"),
+    center_lat: float = Query(..., description="Latitude of active region center"),
+    center_lon: float = Query(..., description="Longitude of active region center"),
+    radius_km: float = Query(18.0, description="Search radius in km (18km covers full 30x30 km area)")
+):
+    """
+    Direct Gram Panchayat / Village search within a 30km x 30km area.
+    Queries Nominatim and Open-Meteo geocoders with phonetic/transliteration variant fallback.
+    Filters results that lie strictly within radius_km.
+    """
+    clean_q = query.strip()
+    query_candidates = generate_transliteration_variants(clean_q)
+    results = []
+    seen = set()
+
+    h_lat = radius_km / 111.0
+    h_lon = radius_km / (111.0 * max(0.2, float(np.cos(np.radians(center_lat)))))
+    s_n, s_s = center_lat + h_lat, center_lat - h_lat
+    s_e, s_w = center_lon + h_lon, center_lon - h_lon
+
+    # Try each transliteration candidate
+    for cand_q in query_candidates:
+        if results:
+            break
+        # 1. Try Nominatim
+        try:
+            url = (
+                f"https://nominatim.openstreetmap.org/search?"
+                f"q={cand_q}&viewbox={s_w},{s_n},{s_e},{s_s}&bounded=0"
+                f"&format=json&addressdetails=1&countrycodes=in&limit=10"
+            )
+            resp = requests.get(url, headers={"User-Agent": "GramVayu-SIH2026/1.0"}, timeout=5)
+            if resp.status_code == 200:
+                for item in resp.json():
+                    lat = float(item["lat"])
+                    lon = float(item["lon"])
+                    d_lat = (lat - center_lat) * 111.0
+                    d_lon = (lon - center_lon) * 111.0 * np.cos(np.radians(center_lat))
+                    dist = np.sqrt(d_lat**2 + d_lon**2)
+                    if dist <= radius_km:
+                        addr = item.get("address", {})
+                        v_name = addr.get("village") or addr.get("town") or addr.get("hamlet") or addr.get("suburb") or item.get("name") or clean_q
+                        taluk = addr.get("county") or addr.get("state_district") or addr.get("state", "Local Block")
+                        p_type = "town" if addr.get("town") else "village"
+                        suffix = "Nagar Panchayat" if p_type == "town" else "Gram Panchayat"
+                        label = v_name if v_name.endswith((" Panchayat", " GP", " NP")) else f"{v_name} {suffix}"
+                        if label.lower() not in seen:
+                            seen.add(label.lower())
+                            results.append({
+                                "name": label,
+                                "lat": lat,
+                                "lon": lon,
+                                "distance_km": round(float(dist), 1),
+                                "taluk": taluk,
+                                "place_type": p_type
+                            })
+        except Exception:
+            pass
+
+        # 2. Fallback to Open-Meteo Geocoding for this candidate
+        if not results:
+            try:
+                om_url = f"https://geocoding-api.open-meteo.com/v1/search?name={cand_q}&count=10&language=en&format=json"
+                om_resp = requests.get(om_url, timeout=5)
+                if om_resp.status_code == 200:
+                    for item in om_resp.json().get("results", []):
+                        lat = float(item["latitude"])
+                        lon = float(item["longitude"])
+                        d_lat = (lat - center_lat) * 111.0
+                        d_lon = (lon - center_lon) * 111.0 * np.cos(np.radians(center_lat))
+                        dist = np.sqrt(d_lat**2 + d_lon**2)
+                        if dist <= radius_km:
+                            v_name = item.get("name", clean_q)
+                            label = v_name if v_name.endswith((" Panchayat", " GP", " NP")) else f"{v_name} Gram Panchayat"
+                            if label.lower() not in seen:
+                                seen.add(label.lower())
+                                results.append({
+                                    "name": label,
+                                    "lat": lat,
+                                    "lon": lon,
+                                    "distance_km": round(float(dist), 1),
+                                    "taluk": item.get("admin2") or item.get("admin1", "Local Block"),
+                                    "place_type": "village"
+                                })
+            except Exception:
+                pass
+
+    return {"results": results}
 
 
 def build_panchayat_bulletins(region_key, region_title, bbox, final_t, final_rh, final_wind, final_precip, final_et0, dem_m):

@@ -69,7 +69,7 @@ REGIONS = {
     },
     "indo_gangetic_plain": {
         "name": "Agra / Gangetic Basin (North Continental Plain)",
-        "bbox": (27.5, 77.6, 26.8, 78.3),
+        "bbox": (27.5, 77.6, 26.8, 78.65),
         "elevation_desc": "150m to 200m flat alluvial plains",
         "archive_dates": ["2023-01-15", "2023-05-15", "2023-07-15", "2023-10-15"],
         "default_date": "2023-05-15"

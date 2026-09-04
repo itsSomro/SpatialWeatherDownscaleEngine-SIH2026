@@ -35,6 +35,14 @@ from frontend.synoptic_india import (
 )
 
 
+def get_safe_gp_index(max_count: int) -> int:
+    idx = st.session_state.get("selected_gp_idx", 0)
+    if not isinstance(idx, int) or idx < 0 or idx >= max(1, max_count):
+        idx = 0
+        st.session_state.selected_gp_idx = 0
+    return idx
+
+
  
 # PAGE SETUP 
 
@@ -195,6 +203,9 @@ with st.sidebar:
                 "is_preset": True,
                 "preset_key": selected_region_key
             }
+            st.session_state.selected_gp_idx = 0
+            st.session_state.pop("sb_gp_idx", None)
+            st.session_state.pop("main_gp_idx", None)
 
     elif input_source == "🔍 Drop Any Custom Region (Search)":
         st.markdown("**Search Any Region Across India**")
@@ -219,6 +230,9 @@ with st.sidebar:
                         "lon": round(custom_location["longitude"], 4),
                         "is_preset": False
                     }
+                    st.session_state.selected_gp_idx = 0
+                    st.session_state.pop("sb_gp_idx", None)
+                    st.session_state.pop("main_gp_idx", None)
             else:
                 st.info("Searching online geocoding database...")
         mode_val = "live"
@@ -290,21 +304,24 @@ with st.sidebar:
     panchayats = data.get("panchayats", [])
     if panchayats:
         gp_names = [p["panchayat_name"] for p in panchayats]
-        if "selected_gp_idx" not in st.session_state or st.session_state.selected_gp_idx >= len(gp_names):
-            st.session_state.selected_gp_idx = 0
+        valid_idx = get_safe_gp_index(len(gp_names))
 
         def _sync_sidebar_gp():
-            st.session_state.selected_gp_idx = st.session_state.sb_gp_idx
+            chosen = st.session_state.get("sb_gp_idx", 0)
+            if isinstance(chosen, int) and 0 <= chosen < len(gp_names):
+                st.session_state.selected_gp_idx = chosen
+            else:
+                st.session_state.selected_gp_idx = 0
 
         st.selectbox(
             "Select Village / Gram Panchayat:",
             range(len(gp_names)),
             format_func=lambda i: f"🏛️ {gp_names[i]} ({panchayats[i].get('elevation_m')}m)",
-            index=st.session_state.selected_gp_idx,
+            index=valid_idx,
             key="sb_gp_idx",
             on_change=_sync_sidebar_gp
         )
-        curr_sb_p = panchayats[st.session_state.selected_gp_idx]
+        curr_sb_p = panchayats[get_safe_gp_index(len(panchayats))]
         st.caption(f"**Taluk:** {curr_sb_p.get('taluk', 'Block')} | **Crops:** {curr_sb_p.get('major_crops', 'Local Agriculture')}")
     else:
         st.caption("Active location: 1km grid center")
@@ -319,12 +336,11 @@ active_reg_title = data.get("region_name", "Selected Block").split(" (")[0]
 metrics = data.get("metrics", {})
 live_meta = data.get("live_meta", {})
 
-if "selected_gp_idx" not in st.session_state or st.session_state.selected_gp_idx >= len(panchayats):
-    st.session_state.selected_gp_idx = 0
-
 if panchayats:
-    curr_p = panchayats[st.session_state.selected_gp_idx]
+    valid_idx = get_safe_gp_index(len(panchayats))
+    curr_p = panchayats[valid_idx]
 else:
+    valid_idx = 0
     curr_p = {
         "panchayat_name": active_reg_title,
         "taluk": "Active District",
@@ -377,28 +393,20 @@ with col_hero_info:
     """, unsafe_allow_html=True)
 
 with col_hero_switch:
-    st.markdown("""
-    <div style="background: #1e2530; border-radius: 14px; padding: 14px 18px; border: 1px solid #374151; margin-bottom: 8px;">
+    st.markdown(f"""
+    <div style="background: #1e2530; border-radius: 14px; padding: 18px 20px; border: 1px solid #374151; height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 8px;">
       <div style="display: flex; gap: 8px; flex-wrap: wrap;">
         <span class="badge-channel" style="font-size: 11px;">✅ 1km Downscaled Reality</span>
         <span class="badge-live" style="font-size: 11px;">🔴 IMD GKMS Directives</span>
       </div>
-      <div style="font-size: 12px; color: #94a3b8; margin-top: 6px;">
-        Physical microclimate downscaled across valley-to-ridge relief.
+      <div style="font-size: 13px; color: #f1f5f9; font-weight: 600;">
+        🏛️ Showing Village {valid_idx + 1} of {len(panchayats)} in {active_reg_title}
+      </div>
+      <div style="font-size: 12px; color: #94a3b8;">
+        👈 To inspect other villages in this block, choose from the sidebar dropdown.
       </div>
     </div>
     """, unsafe_allow_html=True)
-    if panchayats and len(panchayats) > 1:
-        def _sync_main_gp():
-            st.session_state.selected_gp_idx = st.session_state.main_gp_idx
-        st.selectbox(
-            "📍 Quick Switch Village:",
-            range(len(panchayats)),
-            format_func=lambda i: f"🏛️ {panchayats[i]['panchayat_name']} ({panchayats[i].get('elevation_m')}m)",
-            index=st.session_state.selected_gp_idx,
-            key="main_gp_idx",
-            on_change=_sync_main_gp
-        )
 
 # 2. Four Critical Village Hazard Warning Cards (Traffic-Light System)
 h_col1, h_col2, h_col3, h_col4 = st.columns(4)

@@ -15,6 +15,9 @@ outputs/
 *.gz
 data/
 Images/
+!frontend/assets/*
+!frontend/assets/*.npy
+!frontend/assets/*.geojson
 
 .DS_Store
 .vscode/

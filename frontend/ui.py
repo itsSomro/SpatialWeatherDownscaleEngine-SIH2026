@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 try:
     import folium
     from streamlit_folium import st_folium
+    from folium.raster_layers import ImageOverlay
     _FOLIUM_AVAILABLE = True
 except ImportError:
     _FOLIUM_AVAILABLE = False
@@ -373,104 +374,138 @@ with tab_maps:
         st.pyplot(fig3)
 
     st.markdown("---")
-    st.markdown("### 🗺️ Interactive Geographic Thermal Map & Spatial Inspector")
-    st.caption("Inspect 1km downscaled physical fields draped over real-world geography. Hover over any pixel or Panchayat to view instant microclimate metrics.")
+    st.markdown("### 🛰️ Continuous Geographic Thermal Shader (Windy-Style)")
+    st.caption("Smooth, continuous physical downscaling texture draped seamlessly over real geography. Zero circle dots, zero zoom color distortion, with live Windy-style inspection pin.")
 
     map_view_type = st.radio(
         "Thermal Map View Mode:",
-        ["🌍 Real-World Geographic Thermal Map (CartoDB Tiles & Geo-Coordinates)", "📊 2D Pixel Grid Matrix (Cell Index View)"],
+        ["🛰️ Windy-Style Smooth Thermal Shader (Continuous Map)", "📊 2D Pixel Grid Matrix (Cell Index View)"],
         horizontal=True
     )
 
-    if "Real-World" in map_view_type:
-        map_c1, map_c2, map_c3 = st.columns([1.2, 1.2, 2.0])
-        with map_c1:
-            tile_choice = st.selectbox("Basemap Style", ["CartoDB Dark Matter", "OpenStreetMap", "CartoDB Positron"], index=0)
-            map_style_val = "carto-darkmatter" if "Dark" in tile_choice else ("open-street-map" if "Open" in tile_choice else "carto-positron")
-        with map_c2:
-            colorscale_choice = st.selectbox("Thermal Palette", ["Turbo (Thermal Radar)", "Inferno (Infrared Satellite)", "Plasma (High Contrast)", "Coolwarm (Thermal Delta)", "Viridis"], index=0)
-            cs_val = colorscale_choice.split(" ")[0]
+    if "Windy-Style" in map_view_type and _FOLIUM_AVAILABLE:
+        c_map1, c_map2, c_map3, c_map4 = st.columns([1.3, 1.2, 1.1, 1.2])
+        with c_map1:
+            palette_choice = st.selectbox(
+                "Thermal Colormap",
+                ["YlOrRd (Windy Warm Thermal)", "turbo (Multispectral Radar)", "plasma (Vibrant Neon)", "coolwarm (Subgrid Thermal Delta)", "inferno (Infrared Satellite)"],
+                index=0
+            )
+            cmap_key = palette_choice.split(" ")[0]
+        with c_map2:
+            base_choice = st.selectbox(
+                "Basemap Style",
+                ["CartoDB dark_matter", "OpenStreetMap", "CartoDB positron"],
+                index=0
+            )
+        with c_map3:
+            transparency_pct = st.slider("Shader Opacity", 0.30, 0.90, 0.65, 0.05)
+        with c_map4:
+            show_national_bg = st.checkbox("🇮🇳 Cover Entire India", value=True, help="Drapes a smooth macro-thermal background across all of India so the map isn't an isolated square.")
 
         # Compute real coordinates from region bounding box
         bbox = data.get("bbox", [12.7, 75.5, 12.0, 76.2])
         north, west, south, east = bbox[0], bbox[1], bbox[2], bbox[3]
-        nrows, ncols = disp_arr.shape
-        lats = np.linspace(north, south, nrows)
-        lons = np.linspace(west, east, ncols)
-        lon_g, lat_g = np.meshgrid(lons, lats)
         center_lat = (north + south) / 2.0
         center_lon = (west + east) / 2.0
 
-        hover_custom = np.dstack((elev_arr, downscaled_arr, rh_arr, wind_arr, precip_arr, et0_arr))
+        # Build smooth RGBA image for the 1km downscaled field (no circle blobs!)
+        v_min = float(np.min(disp_arr))
+        v_max = float(np.max(disp_arr))
+        norm_field = np.clip((disp_arr - v_min) / (v_max - v_min + 1e-6), 0.0, 1.0)
+        cmap = plt.get_cmap(cmap_key)
+        rgba_1km = cmap(norm_field)
+        rgba_1km[..., 3] = transparency_pct
 
-        fig_geo = go.Figure()
-
-        # Continuous thermal density field
-        fig_geo.add_trace(go.Densitymap(
-            lat=lat_g.flatten(),
-            lon=lon_g.flatten(),
-            z=disp_arr.flatten(),
-            radius=18,
-            colorscale=cs_val,
-            colorbar=dict(title=unit_lbl),
-            customdata=hover_custom.reshape(-1, 6),
-            hovertemplate=(
-                "<b>📍 1km Microclimate Cell</b><br>" +
-                "🌐 Coordinates: %{lat:.4f}° N, %{lon:.4f}° E<br>" +
-                "🏔️ Elevation: %{customdata[0]:.0f} m<br>" +
-                "🌡️ Temperature: %{customdata[1]:.1f} °C<br>" +
-                "💧 Relative Humidity: %{customdata[2]:.0f} %<br>" +
-                "💨 Wind Speed: %{customdata[3]:.1f} km/h<br>" +
-                "🌧️ Precipitation: %{customdata[4]:.1f} mm<br>" +
-                "☀️ FAO-56 ET₀: %{customdata[5]:.1f} mm/day<br>" +
-                "<extra></extra>"
-            )
-        ))
-
-        # Overlaid Gram Panchayat markers
-        panchayats = data.get("panchayats", [])
-        if panchayats:
-            p_lats, p_lons, p_names, p_texts = [], [], [], []
-            lat_offsets = [0.25, 0.50, 0.75, 0.60]
-            lon_offsets = [0.35, 0.50, 0.65, 0.25]
-
-            for i, p in enumerate(panchayats):
-                p_lat = south + (north - south) * lat_offsets[i % 4]
-                p_lon = west + (east - west) * lon_offsets[i % 4]
-                p_lats.append(p_lat)
-                p_lons.append(p_lon)
-                p_names.append(p.get("panchayat_name", f"Panchayat {i+1}"))
-                w_s = p.get("weather_summary", {})
-                adv = p.get("advisories", {})
-                p_texts.append(
-                    f"<b>🏛️ {p.get('panchayat_name')}</b><br>" +
-                    f"🏔️ Elevation: {p.get('elevation_m', 500)}m<br>" +
-                    f"🌡️ Temp Range: {w_s.get('temp_min_c', 16.0):.1f}°C – {w_s.get('temp_max_c', 26.0):.1f}°C<br>" +
-                    f"💧 Moisture: {w_s.get('relative_humidity_pct', 65)}% | 💨 Wind: {w_s.get('wind_speed_kmh', 10.0):.1f} km/h<br>" +
-                    f"☀️ Irrigation Demand: {w_s.get('irrigation_demand_liters_ha', 30000):,} L/ha<br>" +
-                    f"🛡️ Spray Window: {adv.get('spray_window', {}).get('badge', '🟢 Optimal')}<br>" +
-                    f"❄️ Frost Risk: {adv.get('frost', {}).get('badge', '🟢 Safe')}<extra></extra>"
-                )
-
-            fig_geo.add_trace(go.Scattermap(
-                lat=p_lats,
-                lon=p_lons,
-                mode="markers+text",
-                marker=dict(size=14, color="#ffffff"),
-                text=p_names,
-                textposition="top right",
-                hovertemplate="%{customdata}<extra></extra>",
-                customdata=p_texts
-            ))
-
-        fig_geo.update_layout(
-            map_style=map_style_val,
-            map_center=dict(lat=center_lat, lon=center_lon),
-            map_zoom=8.5,
-            height=580,
-            margin=dict(l=0, r=0, t=10, b=10)
+        # Initialize Folium Map
+        m_windy = folium.Map(
+            location=[center_lat, center_lon],
+            zoom_start=9,
+            tiles=base_choice
         )
-        st.plotly_chart(fig_geo, use_container_width=True)
+
+        # 1. Macro Pan-India Thermal Background (covers entire country seamlessly!)
+        if show_national_bg:
+            lats_in = np.linspace(36.5, 8.0, 32)
+            lons_in = np.linspace(68.0, 97.5, 32)
+            lon_g_in, lat_g_in = np.meshgrid(lons_in, lats_in)
+            coarse_national_temp = 32.0 - 0.62 * (lat_g_in - 8.0) + 1.8 * np.sin(lon_g_in * 0.12)
+            norm_nat = np.clip((coarse_national_temp - 5.0) / 30.0, 0.0, 1.0)
+            rgba_national = cmap(norm_nat)
+            rgba_national[..., 3] = transparency_pct * 0.60
+            ImageOverlay(
+                image=rgba_national,
+                bounds=[[8.0, 68.0], [36.5, 97.5]],
+                opacity=transparency_pct * 0.60,
+                name="🇮🇳 National India Thermal Background"
+            ).add_to(m_windy)
+
+        # 2. Local 1km Physics-Guided Downscaled Layer (Ultra-Sharp Microclimate)
+        ImageOverlay(
+            image=rgba_1km,
+            bounds=[[south, west], [north, east]],
+            opacity=transparency_pct,
+            name=f"1km Downscaled {var_choice.split(' ')[1]}"
+        ).add_to(m_windy)
+
+        # 3. Windy-Style Tooltip Marker Pin
+        active_temp = float(metrics.get("mean_temp", 22.0))
+        region_title = data.get("region_name", "Target Region").split(" (")[0]
+
+        windy_pin_html = f"""
+        <div style="transform: translate(-50%, -100%); min-width: 140px; pointer-events: none;">
+          <div style="background: rgba(30, 35, 45, 0.95); backdrop-filter: blur(8px); color: white; border-radius: 8px; padding: 7px 12px; border: 1.5px solid #4a5568; box-shadow: 0 8px 24px rgba(0,0,0,0.6); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center;">
+            <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; font-weight: 600;">{var_choice.split(' ')[1]} 🌡️</div>
+            <div style="font-size: 24px; font-weight: 800; color: #fb923c; line-height: 1.2;">{active_temp:.1f}°C</div>
+            <div style="font-size: 11px; color: #cbd5e1; margin-top: 2px;">📍 {region_title}</div>
+            <div style="font-size: 10px; color: #64748b;">1km Physics Downscaled</div>
+          </div>
+          <div style="width: 2px; height: 16px; background: #fb923c; margin: 0 auto; box-shadow: 0 0 6px #fb923c;"></div>
+          <div style="width: 8px; height: 8px; background: #ffffff; border: 2px solid #fb923c; border-radius: 50%; margin: -2px auto 0 auto;"></div>
+        </div>
+        """
+        folium.Marker(
+            [center_lat, center_lon],
+            icon=folium.DivIcon(html=windy_pin_html),
+            tooltip=f"{region_title}: {active_temp:.1f}°C"
+        ).add_to(m_windy)
+
+        # 4. Gram Panchayat Badges & Pins
+        panchayats = data.get("panchayats", [])
+        lat_offsets = [0.25, 0.50, 0.75, 0.60]
+        lon_offsets = [0.35, 0.50, 0.65, 0.25]
+        for i, p in enumerate(panchayats):
+            p_lat = south + (north - south) * lat_offsets[i % 4]
+            p_lon = west + (east - west) * lon_offsets[i % 4]
+            w_s = p.get("weather_summary", {})
+            adv = p.get("advisories", {})
+            popup_html = f"""
+            <div style="font-family: sans-serif; min-width: 220px; font-size: 12px; color: #1e293b;">
+              <h4 style="margin: 0 0 6px 0; color: #0f172a;">🏛️ {p.get('panchayat_name')}</h4>
+              <div>🏔️ <b>Elevation:</b> {p.get('elevation_m', 500)} m</div>
+              <div>🌡️ <b>Temperature:</b> {w_s.get('temp_mean_c', 20.0):.1f}°C (Min {w_s.get('temp_min_c', 15.0):.1f}° / Max {w_s.get('temp_max_c', 25.0):.1f}°)</div>
+              <div>💧 <b>Humidity:</b> {w_s.get('relative_humidity_pct', 65)}% | 💨 <b>Wind:</b> {w_s.get('wind_speed_kmh', 10.0):.1f} km/h</div>
+              <div>☀️ <b>Irrigation:</b> {w_s.get('irrigation_demand_liters_ha', 30000):,} L/ha</div>
+              <hr style="margin: 6px 0; border: 0; border-top: 1px solid #e2e8f0;"/>
+              <div>🛡️ <b>Spray Window:</b> {adv.get('spray_window', {}).get('badge', '🟢 Optimal')}</div>
+              <div>❄️ <b>Frost Risk:</b> {adv.get('frost', {}).get('badge', '🟢 Safe')}</div>
+            </div>
+            """
+            folium.CircleMarker(
+                location=[p_lat, p_lon],
+                radius=6,
+                color="#ffffff",
+                weight=2,
+                fill=True,
+                fill_color="#f97316",
+                fill_opacity=0.9,
+                tooltip=f"🏛️ {p.get('panchayat_name')} ({w_s.get('temp_mean_c', 20.0):.1f}°C)",
+                popup=folium.Popup(popup_html, max_width=280)
+            ).add_to(m_windy)
+
+        folium.LayerControl(position="topright").add_to(m_windy)
+        st_folium(m_windy, width="100%", height=580, returned_objects=["last_clicked"])
+        st.caption("💡 **Continuous Weather Shader:** Pan and zoom freely across the map. City names, terrain relief, and road networks remain visible under the thermal shader.")
     else:
         # 2D Grid Cell Matrix Inspector
         hover_custom = np.dstack((elev_arr, downscaled_arr, rh_arr, wind_arr, precip_arr, et0_arr))

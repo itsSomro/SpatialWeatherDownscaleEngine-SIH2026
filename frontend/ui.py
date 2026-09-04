@@ -40,8 +40,8 @@ from frontend.synoptic_india import (
 
 st.set_page_config(
     layout="wide",
-    page_title="Universal Spatial Weather Downscaler | SIH 2026",
-    page_icon="⛅"
+    page_title="GramVayu: Gram Panchayat Early Warning System | SIH 2026",
+    page_icon="🌾"
 )
 
 st.markdown("""
@@ -144,9 +144,9 @@ metadata = fetch_metadata()
  
 with st.sidebar:
     st.image("https://img.icons8.com/clouds/200/sun.png", width=90)
-    st.title("Universal Downscaler")
-    st.markdown("**16-Channel Physics-Guided AI Engine**")
-    st.markdown('<span class="badge-channel">16 Physical Channels</span> <span class="badge-live">Live Wind & Humidity</span>', unsafe_allow_html=True)
+    st.title("🌾 GramVayu")
+    st.markdown("**Gram Panchayat Weather & Early Warning**")
+    st.markdown('<span class="badge-channel">16 Physical Channels</span> <span class="badge-live">1km Microclimate</span>', unsafe_allow_html=True)
     st.markdown("---")
 
     # Persistent active region state
@@ -282,56 +282,246 @@ with st.spinner("Executing Universal 16-Channel Physics-Guided Downscaling..."):
 
 
  
-# HEADER & OVERVIEW METRICS
- 
-col_title, col_badge = st.columns([4, 1])
-with col_title:
-    st.title(f"⛅ {data.get('region_name', 'Regional Microclimate')}")
-    st.caption(f"Physiographic Context: {data.get('elevation_desc', 'Custom On-Demand Region')} | Resolution: 1km Microclimate Grid (128x128)")
-with col_badge:
-    st.markdown("<br>", unsafe_allow_html=True)
-    if is_custom:
-        st.markdown('<span class="badge-custom">⚡ On-Demand Live Region</span>', unsafe_allow_html=True)
-    else:
-        st.markdown('<span class="badge-live">🔴 16-Channel Real-Time</span>', unsafe_allow_html=True)
 
+# Sidebar Step 2: Select Gram Panchayat in Active Block
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("### 🏛️ Gram Panchayat Location")
+    panchayats = data.get("panchayats", [])
+    if panchayats:
+        gp_names = [p["panchayat_name"] for p in panchayats]
+        if "selected_gp_idx" not in st.session_state or st.session_state.selected_gp_idx >= len(gp_names):
+            st.session_state.selected_gp_idx = 0
+
+        def _sync_sidebar_gp():
+            st.session_state.selected_gp_idx = st.session_state.sb_gp_idx
+
+        st.selectbox(
+            "Select Village / Gram Panchayat:",
+            range(len(gp_names)),
+            format_func=lambda i: f"🏛️ {gp_names[i]} ({panchayats[i].get('elevation_m')}m)",
+            index=st.session_state.selected_gp_idx,
+            key="sb_gp_idx",
+            on_change=_sync_sidebar_gp
+        )
+        curr_sb_p = panchayats[st.session_state.selected_gp_idx]
+        st.caption(f"**Taluk:** {curr_sb_p.get('taluk', 'Block')} | **Crops:** {curr_sb_p.get('major_crops', 'Local Agriculture')}")
+    else:
+        st.caption("Active location: 1km grid center")
+
+
+# =============================================================================
+# 1ST THING ON TOP: GRAM PANCHAYAT WEATHER & EARLY WARNING SYSTEM
+# =============================================================================
+
+panchayats = data.get("panchayats", [])
+active_reg_title = data.get("region_name", "Selected Block").split(" (")[0]
 metrics = data.get("metrics", {})
 live_meta = data.get("live_meta", {})
 
-m1, m2, m3, m4, m5, m6 = st.columns(6)
-with m1:
-    st.metric("1km Peak Max Temp", f"{metrics.get('max_temp', 0):.1f}°C", delta="Warmest Valley/Slope")
-with m2:
-    st.metric("1km Valley Min Temp", f"{metrics.get('min_temp', 0):.1f}°C", delta="Coldest Ridge/Pool", delta_color="inverse")
-with m3:
-    st.metric("Subgrid Thermal Delta", f"{metrics.get('thermal_delta_c', 0):.1f}°C", help="Temperature spread caused by 1km microtopography")
-with m4:
-    st.metric("Relative Humidity", f"{metrics.get('mean_humidity', live_meta.get('mean_relative_humidity', 65.0)):.0f}%", "Boundary Layer")
-with m5:
-    st.metric("Surface Wind Speed", f"{metrics.get('mean_wind_speed', live_meta.get('mean_wind_speed_kmh', 10.0)):.1f} km/h", "Topographic Wind")
-with m6:
-    st.metric("Panchayat Water Loss", f"{metrics.get('mean_et0_mm', 3.2):.1f} mm/day", f"{int(metrics.get('mean_et0_mm', 3.2) * 10000):,} L/ha Irrigation")
+if "selected_gp_idx" not in st.session_state or st.session_state.selected_gp_idx >= len(panchayats):
+    st.session_state.selected_gp_idx = 0
+
+if panchayats:
+    curr_p = panchayats[st.session_state.selected_gp_idx]
+else:
+    curr_p = {
+        "panchayat_name": active_reg_title,
+        "taluk": "Active District",
+        "elevation_m": int(metrics.get("elevation_range_m", [500, 1000])[0]),
+        "major_crops": "Local Agriculture",
+        "weather_summary": {
+            "temp_mean_c": metrics.get("mean_temp", 22.0),
+            "temp_min_c": metrics.get("min_temp", 18.0),
+            "temp_max_c": metrics.get("max_temp", 26.0),
+            "relative_humidity_pct": metrics.get("mean_humidity", 65.0),
+            "wind_speed_kmh": metrics.get("mean_wind_speed", 10.0),
+            "precipitation_mm": 0.0,
+            "evapotranspiration_et0_mm": metrics.get("mean_et0_mm", 3.5),
+            "dew_point_c": 15.0
+        },
+        "advisories": {
+            "frost": {"badge": "🟢 Frost Safe", "action": "Night temperature stays comfortably above freezing."},
+            "blight": {"badge": "🟢 Disease Low", "action": "Atmospheric moisture is low; fungal spore germination is suppressed."},
+            "spray_window": {"badge": "🟢 Optimal Spray", "reason": "Winds calm (< 12 km/h) and no rain. Ideal spraying conditions."},
+            "livestock": {"badge": "🟢 Normal", "action": "Cows and poultry are comfortable."}
+        },
+        "primary_action": "Standard field monitoring and planned irrigation."
+    }
+
+w_s = curr_p.get("weather_summary", {})
+adv = curr_p.get("advisories", {})
+frost_b = adv.get("frost", {}).get("badge", "🟢 Frost Safe")
+blight_b = adv.get("blight", {}).get("badge", "🟢 Disease Low")
+spray_b = adv.get("spray_window", {}).get("badge", "🟢 Optimal Spray")
+livestock_b = adv.get("livestock", {}).get("badge", "🟢 Normal")
+
+# 1. Top Hero Header Card with Village Details
+col_hero_info, col_hero_switch = st.columns([3.2, 1.8])
+with col_hero_info:
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-radius: 14px; padding: 20px 24px; border: 2px solid #3b82f6; box-shadow: 0 8px 24px rgba(0,0,0,0.4); margin-bottom: 12px;">
+      <div style="font-size: 13px; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px;">
+        🚨 Gram Panchayat Weather & Early Warning System
+      </div>
+      <h2 style="margin: 0; color: #f8fafc; font-size: 26px; font-weight: 800;">
+        🏛️ {curr_p.get('panchayat_name')}
+      </h2>
+      <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 14px;">
+        Taluk: <b style="color: #60a5fa;">{curr_p.get('taluk', 'Block')}</b> &nbsp;|&nbsp; 
+        District: <b style="color: #60a5fa;">{active_reg_title}</b> &nbsp;|&nbsp; 
+        Elevation: <b style="color: #60a5fa;">{curr_p.get('elevation_m', 500)}m</b><br>
+        🌾 Major Agriculture: <b style="color: #34d399;">{curr_p.get('major_crops', 'Local Agriculture')}</b>
+      </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col_hero_switch:
+    st.markdown("""
+    <div style="background: #1e2530; border-radius: 14px; padding: 14px 18px; border: 1px solid #374151; margin-bottom: 8px;">
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <span class="badge-channel" style="font-size: 11px;">✅ 1km Downscaled Reality</span>
+        <span class="badge-live" style="font-size: 11px;">🔴 IMD GKMS Directives</span>
+      </div>
+      <div style="font-size: 12px; color: #94a3b8; margin-top: 6px;">
+        Physical microclimate downscaled across valley-to-ridge relief.
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+    if panchayats and len(panchayats) > 1:
+        def _sync_main_gp():
+            st.session_state.selected_gp_idx = st.session_state.main_gp_idx
+        st.selectbox(
+            "📍 Quick Switch Village:",
+            range(len(panchayats)),
+            format_func=lambda i: f"🏛️ {panchayats[i]['panchayat_name']} ({panchayats[i].get('elevation_m')}m)",
+            index=st.session_state.selected_gp_idx,
+            key="main_gp_idx",
+            on_change=_sync_main_gp
+        )
+
+# 2. Four Critical Village Hazard Warning Cards (Traffic-Light System)
+h_col1, h_col2, h_col3, h_col4 = st.columns(4)
+
+with h_col1:
+    if "Warning" in frost_b or "Danger" in frost_b or "Alert" in frost_b:
+        st.error(f"❄️ **Frost Hazard Alert**\n\n**🔴 Freezing Risk Tonight**\n\n{adv.get('frost', {}).get('action', 'Cold-air pooling expected. Turn on light sprinklers at 4:00 AM.')}")
+    else:
+        st.success(f"❄️ **Frost & Cold Wave**\n\n**🟢 Safe Tonight (No Freezing)**\n\n{adv.get('frost', {}).get('action', 'Night temperature stays safely above freezing.')}")
+
+with h_col2:
+    if "Alert" in blight_b or "Danger" in blight_b:
+        st.error(f"🍄 **Crop Fungal Blight**\n\n**🔴 High Blight Risk**\n\n{adv.get('blight', {}).get('action', 'High moisture (RH ≥ 85%) favors late blight. Avoid wetting crop leaves.')}")
+    else:
+        st.success(f"🍄 **Crop Fungal Blight**\n\n**🟢 Disease Pressure Low**\n\n{adv.get('blight', {}).get('action', 'Atmospheric moisture is low; fungal spore germination is suppressed.')}")
+
+with h_col3:
+    if "Do Not" in spray_b or "Postpone" in spray_b:
+        st.warning(f"🚜 **Medicine Spray Window**\n\n**🟡 Postpone Spraying**\n\n{adv.get('spray_window', {}).get('reason', 'Gusty winds or high heat detected. Chemical drift risk.')}")
+    else:
+        st.success(f"🚜 **Medicine Spray Window**\n\n**🟢 Safe Window Open**\n\n{adv.get('spray_window', {}).get('reason', 'Winds calm (< 12 km/h) and no rain. Ideal time to apply foliar medicine.')}")
+
+with h_col4:
+    p_et0 = w_s.get('evapotranspiration_et0_mm', metrics.get('mean_et0_mm', 3.2))
+    p_water_l = int(p_et0 * 10000)
+    st.info(f"💧 **Soil Irrigation Need**\n\n**☀️ {p_et0:.1f} mm / day**\n\nCrops lost **{p_water_l:,} L / ha** today. Recommended drip irrigation: ~3 to 4 hours.")
+
+# 3. Today's Village Weather Telemetry at a Glance
+st.markdown(f"#### ⛅ Today's Weather in {curr_p.get('panchayat_name')}:")
+w1, w2, w3, w4, w5 = st.columns(5)
+with w1:
+    st.metric("Temperature", f"{w_s.get('temp_mean_c', 20.0):.1f}°C", f"Min {w_s.get('temp_min_c', 15.0):.1f}° / Max {w_s.get('temp_max_c', 25.0):.1f}°")
+with w2:
+    st.metric("Air Humidity", f"{w_s.get('relative_humidity_pct', 65)}%", f"Dew Point: {w_s.get('dew_point_c', 15.0):.1f}°C")
+with w3:
+    st.metric("Surface Wind", f"{w_s.get('wind_speed_kmh', 8.0):.1f} km/h", "Topographic Wind")
+with w4:
+    st.metric("Rainfall", f"{w_s.get('precipitation_mm', 0.0):.1f} mm", "Precipitation")
+with w5:
+    st.metric("Soil Water Loss", f"{p_et0:.1f} mm/day", f"{p_water_l:,} L/ha Need")
+
+# 4. What Should Farmers in this Village Do Today? (Plain Language Guidance)
+st.markdown(f"#### 🚨 What Should Farmers in {curr_p.get('panchayat_name')} Do Today? (Plain Language Directives)")
+f1, f2, f3, f4 = st.columns(4)
+with f1:
+    st.markdown(f"**❄️ Night Frost & Cold:**\n\n{frost_b}")
+    st.info(adv.get("frost", {}).get("action", "No frost danger tonight."))
+with f2:
+    st.markdown(f"**🍄 Crop Leaf Disease:**\n\n{blight_b}")
+    st.info(adv.get("blight", {}).get("action", "Humidity level is safe."))
+with f3:
+    st.markdown(f"**🚜 Agrochemical Spraying:**\n\n{spray_b}")
+    st.info(adv.get("spray_window", {}).get("reason", "Good conditions for spraying."))
+with f4:
+    st.markdown(f"**🐄 Dairy & Cattle Care:**\n\n{livestock_b}")
+    st.info(adv.get("livestock", {}).get("action", "Cows and poultry are comfortable."))
+
+# 5. WhatsApp Broadcast Box
+st.markdown(f"#### 📲 1-Click WhatsApp Broadcast for {curr_p.get('panchayat_name')}:")
+wa_text = (
+    f"📢 *IMD GKMS Weather Alert for {curr_p.get('panchayat_name')}*\n"
+    f"📍 Taluk: {curr_p.get('taluk', 'Block')} | Elevation: {curr_p.get('elevation_m')}m\n"
+    f"🌾 Main Crops: {curr_p.get('major_crops')}\n"
+    f"─────────────────\n"
+    f"🌡️ Temperature: {w_s.get('temp_mean_c', 20.0):.1f}°C (Min {w_s.get('temp_min_c', 15.0):.1f}° / Max {w_s.get('temp_max_c', 25.0):.1f}°)\n"
+    f"💧 Humidity: {w_s.get('relative_humidity_pct', 65)}% | 💨 Wind: {w_s.get('wind_speed_kmh', 8.0):.1f} km/h\n"
+    f"☀️ Soil Irrigation Need: {p_water_l:,} Liters/Hectare\n"
+    f"─────────────────\n"
+    f"🚨 *Farm Action Directives Today:*\n"
+    f"• Frost: {frost_b}\n"
+    f"• Crop Disease: {blight_b}\n"
+    f"• Spray Window: {spray_b}\n"
+    f"• Key Action: {curr_p.get('primary_action')}\n"
+    f"─────────────────\n"
+    f"Shared via GramVayu 1km Microclimate Downscaler"
+)
+st.text_area("Copy text below to paste into Panchayat or Farmer WhatsApp groups:", value=wa_text, height=130)
 
 st.markdown("---")
 
+# =============================================================================
+# SUPPORTING TOOLS, TERRAIN VISUALIZER, SCIENTIFIC VALIDATION & AI TABS
+# =============================================================================
 
- 
-# MAIN MULTI-TAB INTERACTION
- 
-tab_maps, tab_panchayats, tab_ground_stations, tab_ai = st.tabs([
-    "🛰️ High-Resolution Microclimate Maps",
-    "🏛️ Gram Panchayat Intelligence",
-    "🧪 Phase 2: Real Ground Station Sensor Validation",
-    "🤖 AI Agro-Climatic Advisory"
+tab_table, tab_maps, tab_ground_stations, tab_ai = st.tabs([
+    f"📊 All Gram Panchayats in {active_reg_title} (Comparison Table)",
+    "🗺️ 1km Microclimate Terrain Map & Pan-India Visualizer",
+    "🧪 Ground Sensor Validation (NOAA ISD)",
+    "🤖 GramVayu AI: Village Advisor"
 ])
 
+with tab_table:
+    st.subheader(f"📊 All Gram Panchayats in {active_reg_title} (Comparison Table)")
+    st.caption("Cross-village comparison of elevation, downscaled temperature, and irrigation requirements across the block.")
+    if panchayats:
+        table_data = []
+        for p in panchayats:
+            p_ws = p.get("weather_summary", {})
+            p_adv = p.get("advisories", {})
+            table_data.append({
+                "Gram Panchayat": p["panchayat_name"],
+                "Taluk / Block": p.get("taluk", "Block"),
+                "Elevation": f"{p.get('elevation_m', 500)}m",
+                "Mean Temp": f"{p_ws.get('temp_mean_c', 20.0):.1f}°C",
+                "Min Temp": f"{p_ws.get('temp_min_c', 15.0):.1f}°C",
+                "Humidity": f"{p_ws.get('relative_humidity_pct', 65)}%",
+                "Water Need (L/ha)": f"{p_ws.get('irrigation_demand_liters_ha', 30000):,}",
+                "Spray Window": p_adv.get("spray_window", {}).get("badge", "🟢 Safe"),
+                "Today's Action": p.get("primary_action", "Normal")[:65] + "..."
+            })
+        st.dataframe(pd.DataFrame(table_data), use_container_width=True, hide_index=True)
+    else:
+        st.info("Loading Gram Panchayats data from downscaler engine...")
 
- 
-# TAB 1: PAN-INDIA SYNOPTIC MAP & 128x128 MICROCLIMATE INSPECTOR
+
+
+# =============================================================================
+# TAB 2: 1KM MICROCLIMATE TERRAIN MAP & VISUALIZER (SUPPORTING TOOL)
+# =============================================================================
 
 with tab_maps:
-    st.subheader("🇮🇳 Pan-India Synoptic Weather Field (~10km - 30km Macro View)")
-    st.caption("Smooth continuous synoptic weather field across the Indian subcontinent, clipped cleanly to national borders. Tap anywhere on the map or select an agro-climatic zone below to inspect its detailed 128×128 (1km) microclimate box.")
+    st.subheader("🗺️ 1km Microclimate Terrain Map & Spatial Downscaling")
+    st.caption("Inspect the 1km downscaled physical field draped across mountains, valleys, and terrain relief.")
 
     # Controls bar
     ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns([1.3, 1.2, 1.1, 1.1])
@@ -339,24 +529,27 @@ with tab_maps:
         synoptic_var = st.selectbox(
             "Weather Variable",
             ["🌡️ Temperature (°C)", "💧 Relative Humidity (%)", "💨 Surface Wind (km/h)"],
-            index=0
+            index=0,
+            key="map_syn_var"
         )
         var_key = "temperature" if "Temperature" in synoptic_var else ("humidity" if "Humidity" in synoptic_var else "wind")
     with ctrl_col2:
         palette_choice = st.selectbox(
             "Thermal Colormap",
             ["turbo (Multispectral Radar)", "YlOrRd (Windy Warm Thermal)", "plasma (Vibrant Neon)", "coolwarm (Subgrid Thermal Delta)", "inferno (Infrared Satellite)"],
-            index=0
+            index=0,
+            key="map_palette"
         )
         cmap_key = palette_choice.split(" ")[0]
     with ctrl_col3:
         base_choice = st.selectbox(
             "Basemap Style",
             ["CartoDB dark_matter", "OpenStreetMap", "CartoDB positron"],
-            index=0
+            index=0,
+            key="map_base"
         )
     with ctrl_col4:
-        transparency_pct = st.slider("Shader Opacity", 0.30, 0.90, 0.65, 0.05)
+        transparency_pct = st.slider("Shader Opacity", 0.30, 0.90, 0.65, 0.05, key="map_opacity")
 
     # Active target coordinates and bounding box
     active_target = st.session_state.get("active_region_info", {
@@ -407,11 +600,10 @@ with tab_maps:
             ).add_to(m_windy)
 
         # 3. Invisible Centroid Hit-Targets (63 key locations across all states of India)
-        # ZERO visible dots, pure clean thermal map, but hover tooltips and instant click-to-downscale!
         for c in PAN_INDIA_CENTROIDS:
             w_c = get_centroid_weather(c["lat"], c["lon"], c["elev_m"])
             t_val = w_c["temp_c"] if var_key == "temperature" else (w_c["rh_pct"] if var_key == "humidity" else w_c["wind_kmh"])
-            tooltip_txt = f"📍 {c['name']} ({c['state']}) • {t_val}{unit_nat} | Click to inspect 1km Downscaled Box"
+            tooltip_txt = f"📍 {c['name']} ({c['state']}) • {t_val}{unit_nat} | Click to inspect"
             folium.CircleMarker(
                 location=[c["lat"], c["lon"]],
                 radius=24,
@@ -437,7 +629,23 @@ with tab_maps:
             name=f"1km Downscaled {synoptic_var.split(' ')[1]}"
         ).add_to(m_windy)
 
-        # 5. Glowing 128x128 Bounding Box Outline
+        # 5. Real Gram Panchayat Location Badges on the Map!
+        for p in panchayats:
+            coords = p.get("coordinates")
+            if coords:
+                p_t = p.get("weather_summary", {}).get("temp_mean_c", 22.0)
+                folium.CircleMarker(
+                    location=[coords[0], coords[1]],
+                    radius=7,
+                    color="#ffffff",
+                    weight=2,
+                    fill=True,
+                    fill_color="#f97316",
+                    fill_opacity=0.9,
+                    tooltip=f"🏛️ {p['panchayat_name']} ({p_t:.1f}°C, Elev: {p.get('elevation_m')}m)"
+                ).add_to(m_windy)
+
+        # 6. Glowing 128x128 Bounding Box Outline
         folium.Rectangle(
             bounds=[[south, west], [north, east]],
             color="#fb923c",
@@ -445,179 +653,31 @@ with tab_maps:
             dash_array="5, 5",
             fill=True,
             fill_color="#fb923c",
-            fill_opacity=0.12,
+            fill_opacity=0.08,
             tooltip=f"🔬 128x128 1km Downscaled Box: {active_name}"
         ).add_to(m_windy)
 
-        # 6. Active Focus Pin (Windy-Style HTML Badge)
+        # 7. Active Focus Pin
         active_temp = float(metrics.get("mean_temp", 24.0))
-        windy_pin_html = f"""
-        <div style="transform: translate(-50%, -100%); min-width: 140px; pointer-events: none;">
-          <div style="background: rgba(20, 25, 35, 0.95); backdrop-filter: blur(8px); color: white; border-radius: 8px; padding: 7px 12px; border: 1.5px solid #fb923c; box-shadow: 0 8px 24px rgba(0,0,0,0.7); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center;">
-            <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; font-weight: 600;">{synoptic_var.split(' ')[1]} 🌡️</div>
-            <div style="font-size: 24px; font-weight: 800; color: #fb923c; line-height: 1.2;">{active_temp:.1f}°C</div>
-            <div style="font-size: 11px; color: #cbd5e1; margin-top: 2px;">📍 {active_name.split(' (')[0]}</div>
-            <div style="font-size: 10px; color: #38bdf8; font-weight: 600;">128x128 Box (1km Physics)</div>
-          </div>
-          <div style="width: 2px; height: 16px; background: #fb923c; margin: 0 auto; box-shadow: 0 0 6px #fb923c;"></div>
-          <div style="width: 8px; height: 8px; background: #ffffff; border: 2px solid #fb923c; border-radius: 50%; margin: -2px auto 0 auto;"></div>
-        </div>
-        """
         folium.Marker(
             [active_lat, active_lon],
-            icon=folium.DivIcon(html=windy_pin_html),
             tooltip=f"{active_name}: {active_temp:.1f}°C"
         ).add_to(m_windy)
 
         folium.LayerControl(position="topright").add_to(m_windy)
 
-        # Render Folium Map & Capture User Clicks
-        map_click = st_folium(m_windy, width="100%", height=560, returned_objects=["last_clicked"])
+        # Render Map
+        st_folium(m_windy, width="100%", height=520, returned_objects=["last_clicked"])
 
-        # Handle Map Clicks to Update Region
-        if map_click and map_click.get("last_clicked"):
-            c_lat = round(map_click["last_clicked"]["lat"], 4)
-            c_lon = round(map_click["last_clicked"]["lng"], 4)
-            last_click = st.session_state.get("last_registered_click")
-            if last_click != (c_lat, c_lon):
-                st.session_state.last_registered_click = (c_lat, c_lon)
-                # Check if near a curated centroid
-                nearest = find_nearest_centroid(c_lat, c_lon)
-                if nearest:
-                    # Check if matches preset region
-                    preset_match = None
-                    for pk, pv in metadata.get("regions", {}).items():
-                        if nearest["name"].lower() in pv["name"].lower() or pk in nearest["name"].lower():
-                            preset_match = pk
-                            break
-                    if preset_match:
-                        st.session_state.active_region_info = {
-                            "name": nearest["name"],
-                            "lat": nearest["lat"],
-                            "lon": nearest["lon"],
-                            "is_preset": True,
-                            "preset_key": preset_match
-                        }
-                    else:
-                        st.session_state.active_region_info = {
-                            "name": f"{nearest['name']} ({nearest['state']})",
-                            "lat": nearest["lat"],
-                            "lon": nearest["lon"],
-                            "is_preset": False
-                        }
-                else:
-                    st.session_state.active_region_info = {
-                        "name": f"Region ({c_lat:.2f}°N, {c_lon:.2f}°E)",
-                        "lat": c_lat,
-                        "lon": c_lon,
-                        "is_preset": False
-                    }
-                st.rerun()
-
-    # Quick Jump Selector Row
-    st.markdown("**⚡ Quick Jump to Iconic Regions or Select Any District:**")
-    q_col1, q_col2 = st.columns([3, 2])
-    with q_col1:
-        j_cols = st.columns(6)
-        presets_buttons = [
-            ("🏔️ Kullu", "himalayas_kullu", 31.95, 77.10, "Kullu-Manali (Western Himalayas)"),
-            ("🌿 Kodagu", "kodagu", 12.35, 75.85, "Kodagu / Coorg (Western Ghats)"),
-            ("⛰️ Chikmagaluru", "chikmagaluru", 13.32, 75.77, "Chikmagaluru (Western Ghats)"),
-            ("🌾 Kolar", "deccan_plateau", 13.13, 78.13, "Kolar / Deccan (Semi-Arid Plateau)"),
-            ("🏛️ Agra", "indo_gangetic_plain", 27.18, 78.00, "Agra / Gangetic Basin (North Plain)"),
-            ("🍵 Darjeeling", None, 27.04, 88.26, "Darjeeling (West Bengal)")
-        ]
-        for idx, (lbl, pkey, p_lat, p_lon, full_n) in enumerate(presets_buttons):
-            with j_cols[idx]:
-                if st.button(lbl, use_container_width=True, key=f"quick_btn_{idx}"):
-                    st.session_state.active_region_info = {
-                        "name": full_n,
-                        "lat": p_lat,
-                        "lon": p_lon,
-                        "is_preset": pkey is not None,
-                        "preset_key": pkey
-                    }
-                    st.rerun()
-    with q_col2:
-        centroid_options = [f"{c['name']} ({c['state']}) - Elev: {c['elev_m']}m" for c in PAN_INDIA_CENTROIDS]
-        picked_c_idx = st.selectbox(
-            "Jump to any of 60+ Meteorological Zones across India:",
-            range(len(centroid_options)),
-            format_func=lambda i: centroid_options[i],
-            index=0,
-            label_visibility="collapsed"
-        )
-        if st.button("📍 Load Selected Zone", use_container_width=True):
-            target_c = PAN_INDIA_CENTROIDS[picked_c_idx]
-            st.session_state.active_region_info = {
-                "name": f"{target_c['name']} ({target_c['state']})",
-                "lat": target_c["lat"],
-                "lon": target_c["lon"],
-                "is_preset": False
-            }
-            st.rerun()
-
-    st.markdown("---")
-
-    # -------------------------------------------------------------
-    # PART B: DETAILED 128x128 MICROCLIMATE INSPECTION BOX
-    # -------------------------------------------------------------
-    st.markdown(f"""
-    <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-radius: 12px; padding: 16px 20px; border: 1.5px solid #fb923c; margin-bottom: 20px; box-shadow: 0 8px 30px rgba(0,0,0,0.5);">
-      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-        <div>
-          <h3 style="margin: 0; color: #f8fafc;">🔬 Detailed 128×128 Microclimate Downscaling Inspection Box</h3>
-          <p style="margin: 4px 0 0 0; color: #94a3b8; font-size: 13px;">
-            Target: <b style="color: #fb923c;">{active_name}</b> | Center: <code>{active_lat:.4f}°N, {active_lon:.4f}°E</code> | BBox: <code>{south:.2f}°N–{north:.2f}°N, {west:.2f}°E–{east:.2f}°E</code> (128km × 128km)
-          </p>
-        </div>
-        <div style="background: #0369a1; color: white; padding: 5px 14px; border-radius: 20px; font-weight: 700; font-size: 12px; box-shadow: 0 0 10px rgba(3,105,161,0.5);">
-          ⚡ 16-Channel ResAttnUNet (1km Resolution)
-        </div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # 1km Variable Selector
-    var_subchoice = st.radio(
-        "Select Microclimate Variable for 128×128 Box:",
-        ["🌡️ Temperature (°C)", "💧 Relative Humidity (%)", "💨 Surface Wind (km/h)", "🌧️ Precipitation (mm)", "☀️ Evapotranspiration ET₀ (mm/day)"],
-        horizontal=True
-    )
-
+    # 3-Panel Side-by-Side Comparison
+    st.markdown("#### 🔬 Physical Downscaling Breakdown (Coarse vs 1km DEM vs 1km AI)")
     downscaled_arr = np.array(data["downscaled_grid"])
     coarse_arr = np.array(data["coarse_grid"])
     elev_arr = np.array(data["elevation_grid"])
-    rh_arr = np.array(data.get("humidity_grid", downscaled_arr))
-    wind_arr = np.array(data.get("wind_grid", downscaled_arr))
-    precip_arr = np.array(data.get("precip_grid", downscaled_arr))
-    et0_arr = np.array(data.get("et0_grid", downscaled_arr))
 
-    if "Temperature" in var_subchoice:
-        disp_arr = downscaled_arr
-        cmap_name = "coolwarm"
-        unit_lbl = "Temperature (°C)"
-    elif "Humidity" in var_subchoice:
-        disp_arr = rh_arr
-        cmap_name = "YlGnBu"
-        unit_lbl = "Relative Humidity (%)"
-    elif "Wind" in var_subchoice:
-        disp_arr = wind_arr
-        cmap_name = "plasma"
-        unit_lbl = "Wind Speed (km/h)"
-    elif "Precipitation" in var_subchoice:
-        disp_arr = precip_arr
-        cmap_name = "Blues"
-        unit_lbl = "Rainfall (mm)"
-    else:
-        disp_arr = et0_arr
-        cmap_name = "YlOrRd"
-        unit_lbl = "FAO-56 ET₀ (mm/day)"
-
-    # 3-Panel Side-by-Side Comparison
     c_p1, c_p2, c_p3 = st.columns(3)
     with c_p1:
-        st.markdown("**1. Coarse NWP Input (~10km - 30km)**")
+        st.markdown("**1. Coarse Input (~10km - 30km)**")
         fig1, ax1 = plt.subplots(figsize=(5.5, 4.5))
         im1 = ax1.imshow(coarse_arr, cmap="coolwarm")
         ax1.axis("off")
@@ -633,89 +693,12 @@ with tab_maps:
         st.pyplot(fig2)
 
     with c_p3:
-        st.markdown(f"**3. Physics + ResAttnUNet (1km {var_subchoice.split(' ')[1]})**")
+        st.markdown("**3. ResAttnUNet (1km Downscaled)**")
         fig3, ax3 = plt.subplots(figsize=(5.5, 4.5))
-        im3 = ax3.imshow(disp_arr, cmap=cmap_name)
+        im3 = ax3.imshow(downscaled_arr, cmap="coolwarm")
         ax3.axis("off")
-        plt.colorbar(im3, ax=ax3, fraction=0.046, label=unit_lbl)
+        plt.colorbar(im3, ax=ax3, fraction=0.046, label="1km Temp (°C)")
         st.pyplot(fig3)
-
-    # 2D Grid Cell Matrix Inspector
-    st.markdown("#### 🔍 Interactive 2D 1km Grid Cell Matrix (Hover to Inspect)")
-    st.caption("Move your mouse over individual 1km pixels to inspect exact elevation, temperature, humidity, wind, rainfall, and FAO-56 irrigation demands.")
-    hover_custom = np.dstack((elev_arr, downscaled_arr, rh_arr, wind_arr, precip_arr, et0_arr))
-    fig_heat = go.Figure(data=go.Heatmap(
-        z=disp_arr,
-        colorscale="RdBu_r" if "Temperature" in var_subchoice else ("YlGnBu" if "Humidity" in var_subchoice or "Precipitation" in var_choice else "Viridis"),
-        colorbar=dict(title=unit_lbl),
-        customdata=hover_custom,
-        hovertemplate=(
-            "<b>1km Grid Cell [%{x}, %{y}]</b><br>" +
-            "🏔️ Elevation: %{customdata[0]:.0f} m<br>" +
-            "🌡️ Temperature: %{customdata[1]:.1f} °C<br>" +
-            "💧 Relative Humidity: %{customdata[2]:.0f} %<br>" +
-            "💨 Wind Speed: %{customdata[3]:.1f} km/h<br>" +
-            "🌧️ Precipitation: %{customdata[4]:.1f} mm<br>" +
-            "☀️ FAO-56 ET₀: %{customdata[5]:.1f} mm/day<br>" +
-            "<extra></extra>"
-        )
-    ))
-    fig_heat.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="#1e2530",
-        plot_bgcolor="#151a23",
-        height=450,
-        margin=dict(l=20, r=20, t=30, b=20),
-        xaxis=dict(title="East-West Grid Distance (~1 km/pixel)", showgrid=False),
-        yaxis=dict(title="North-South Grid Distance (~1 km/pixel)", showgrid=False, scaleanchor="x")
-    )
-    st.plotly_chart(fig_heat, use_container_width=True)
-
-
- 
-# TAB 2: GRAM PANCHAYAT AGRO-METEOROLOGICAL INTELLIGENCE
- 
-with tab_panchayats:
-    st.subheader("🏛️ Gram Panchayat Localized Agro-Meteorological Intelligence")
-    st.markdown("Official IMD GKMS-format localized advisories (Frost, Fungal Blight, Chemical Spray Windows, and Irrigation Scheduling) for individual Panchayats.")
-
-    panchayats = data.get("panchayats", [])
-
-    for p in panchayats:
-        w_sum = p.get("weather_summary", {})
-        adv = p.get("advisories", {})
-        frost_b = adv.get("frost", {}).get("badge", "🟢 Frost Safe")
-        blight_b = adv.get("blight", {}).get("badge", "🟢 Disease Low")
-        spray_b = adv.get("spray_window", {}).get("badge", "🟢 Optimal Spray")
-        livestock_b = adv.get("livestock", {}).get("badge", "🟢 Normal")
-
-        with st.expander(f"📍 **{p.get('panchayat_name', 'Panchayat')}** — Elev: {p.get('elevation_m', 500)}m | Action: {p.get('primary_action', 'Nominal')}", expanded=True):
-            # Row of 4 weather KPIs
-            k1, k2, k3, k4 = st.columns(4)
-            with k1:
-                st.metric("Temperature", f"{w_sum.get('temp_mean_c', 20.0):.1f}°C", f"Min {w_sum.get('temp_min_c', 15.0):.1f}° / Max {w_sum.get('temp_max_c', 25.0):.1f}°")
-            with k2:
-                st.metric("Moisture & Dew Point", f"{w_sum.get('relative_humidity_pct', 65)}%", f"Dew Point: {w_sum.get('dew_point_c', 15.0):.1f}°C (VPD: {w_sum.get('vapor_pressure_deficit_kpa', 0.8)} kPa)")
-            with k3:
-                st.metric("Wind & Rainfall", f"{w_sum.get('wind_speed_kmh', 8.0):.1f} km/h", f"Rain: {w_sum.get('precipitation_mm', 0.0):.1f} mm")
-            with k4:
-                st.metric("Irrigation Demand (ET₀)", f"{w_sum.get('evapotranspiration_et0_mm', 3.5):.1f} mm/day", f"{w_sum.get('irrigation_demand_liters_ha', 35000):,} L/ha")
-
-            # Row of 4 Agromet Advisories
-            st.markdown("##### 🚨 Official Agromet Hazard & Operational Guidance")
-            a1, a2, a3, a4 = st.columns(4)
-            with a1:
-                st.markdown(f"**Frost Status:** {frost_b}")
-                st.caption(adv.get("frost", {}).get("action", "Temperature safely above freezing."))
-            with a2:
-                st.markdown(f"**Fungal Blight:** {blight_b}")
-                st.caption(adv.get("blight", {}).get("action", "Low pathogen pressure."))
-            with a3:
-                st.markdown(f"**Spray Window:** {spray_b}")
-                st.caption(adv.get("spray_window", {}).get("reason", "Conditions suitable."))
-            with a4:
-                st.markdown(f"**Livestock Safety:** {livestock_b}")
-                st.caption(adv.get("livestock", {}).get("action", "Thermal comfort zone."))
 
 
  

@@ -2,8 +2,8 @@
 Universal Physics-Guided Residual Attention U-Net (ResAttnUNet) (SIH 2026)
 -------------------------------------------------------------------------
 A state-of-the-art downscaling neural network featuring:
-1. 14 Input Channels spanning Synoptic Meteorology, Differential Topography,
-   Wind Dynamics, and Boundary Layer Moisture.
+1. 16 Input Channels spanning Synoptic Meteorology, Differential Topography,
+   Wind Dynamics, Boundary Layer Moisture, and Land Cover (NDVI + Built-up).
 2. Residual Convolutions with skip identity projections to prevent gradient degradation.
 3. Squeeze-and-Excitation (SE) Channel Attention Gates that dynamically weight
    atmospheric features based on local terrain and weather regime.
@@ -96,10 +96,10 @@ class ResidualBlock(nn.Module):
 
 class DownscaleUNet(nn.Module):
     """
-    Universal 14-Channel Residual Attention U-Net.
+    Universal 16-Channel Residual Attention U-Net.
     (Also aliased as ResAttnUNet for backward and forward compatibility).
     """
-    def __init__(self, in_channels=14, out_channels=1, base=32):
+    def __init__(self, in_channels=16, out_channels=1, base=32):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -212,7 +212,7 @@ def run_epoch(model, loader, optimizer=None, scaler=None):
 
 def train():
     print("=" * 80)
-    print("TRAINING UNIVERSAL 14-CHANNEL RESIDUAL ATTENTION U-NET (ResAttnUNet)")
+    print("TRAINING UNIVERSAL 16-CHANNEL RESIDUAL ATTENTION U-NET (ResAttnUNet)")
     print(f"Device: {DEVICE}")
     print(f"Dataset: {TRAIN_NPZ}")
     print("=" * 80)
@@ -259,7 +259,7 @@ def train():
                     "in_channels": in_channels,
                     "out_channels": 1,
                     "base": 32,
-                    "model_type": "ResAttnUNet_14ch",
+                    "model_type": "ResAttnUNet_16ch",
                     "alpha_l1": ALPHA_L1,
                     "beta_gradient": BETA_GRADIENT,
                     "channels": INPUT_CHANNELS
@@ -282,7 +282,7 @@ def train():
     plt.plot(val_losses, label="Validation Loss", linewidth=2)
     plt.xlabel("Epoch")
     plt.ylabel("Composite Loss (MSE + 0.5 L1 + 0.3 Sobel Grad)")
-    plt.title("Universal 14-Channel ResAttnUNet Training Convergence")
+    plt.title("Universal 16-Channel ResAttnUNet Training Convergence")
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.tight_layout()

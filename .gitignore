@@ -17,4 +17,5 @@ data/
 Images/
 
 .DS_Store
-.vscode/
+.vscode/
+.idea/

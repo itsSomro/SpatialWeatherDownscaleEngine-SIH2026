@@ -195,7 +195,7 @@ I am your **Physics-Guided Agro-Meteorological & Microclimate Intelligence Agent
 I am **GramVayu AI**, an agro-meteorological advisory agent developed for the **Smart India Hackathon (SIH 2026)**.
 
 I bridge the gap between coarse 10km global numerical weather models (ERA5) and 1km hyper-local village realities by analyzing:
-1. **14 Physical & Topographic Channels:** High-resolution DEM topography, slope, aspect vectors, curvature, orographic wind forcing, and moisture.
+1. **16 Physical & Topographic Channels:** High-resolution DEM topography, slope, aspect vectors, curvature, orographic wind forcing, moisture, vegetation canopy (NDVI), and built-up land cover.
 2. **Physics-Guided Residual U-Net:** Combining moist adiabatic lapse-rate physics with deep attention networks.
 3. **Panchayat Grounding:** Translating microclimate gradients into actionable agricultural advisories for rural farmers and disaster management teams.
 """
@@ -227,7 +227,7 @@ Our engine downscales 10km ERA5 data to a 1km resolution using a two-tier physic
    $$\\Gamma_{{eff}} = \\Gamma_{{dry}} \\times \\left(1 - 0.35 \\times \\frac{{RH}}{{100}}\\right)$$
    $$T_{{physics}} = T_{{coarse}} - \\Gamma_{{eff}} \\times \\Delta Z$$
 
-2. **Tier 2 — 14-Channel Residual Attention U-Net:**
+2. **Tier 2 — 16-Channel Residual Attention U-Net:**
    Predicts the local microclimate residual $R$ governed by:
    - Terrain slope magnitude, downhill unit vectors (solar aspect $N/S$ and $E/W$)
    - Topographic curvature $\\nabla^2 z$ (drainage basins vs exposed ridges)

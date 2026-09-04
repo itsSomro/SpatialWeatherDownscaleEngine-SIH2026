@@ -41,7 +41,7 @@
                                                     |                     |
                                                     v                     |
                                       +---------------------------+       |
-                                      | 14-Channel ResAttnUNet    |       |
+                                      | 16-Channel ResAttnUNet    |       |
                                       | (Residual Blocks + SE     |       |
                                       | Channel Attention Gates)  |       |
                                       +-------------+-------------+       |
@@ -59,9 +59,9 @@
 
 ---
 
-## 1. The 14 Input Channels
+## 1. The 16 Input Channels
 
-The model ingests a 14-channel tensor of shape `(Batch, 14, 128, 128)` representing a 128km × 128km spatial patch at 1km grid resolution:
+The model ingests a 16-channel tensor of shape `(Batch, 16, 128, 128)` representing a 128km × 128km spatial patch at 1km grid resolution:
 
 | Channel Index | Name | Physical Source | Description & Role |
 | :--- | :--- | :--- | :--- |
@@ -115,7 +115,7 @@ $$\Delta T_{\text{wind}} = - c_{\text{wind}} \times \text{orographic\_wind\_norm
 ---
 
 ## 4. Model Architecture: Residual Attention U-Net (`ResAttnUNet`)
-- **Residual Convolutions**: DoubleConv with skip identity projections preventing vanishing gradients across 14 channels.
+- **Residual Convolutions**: DoubleConv with skip identity projections preventing vanishing gradients across 16 channels.
 - **Squeeze-and-Excitation (SE) Channel Attention Gates**: Computes global channel statistics and applies sigmoid recalibration, allowing the network to dynamically upweight wind in stormy regimes and solar aspect in clear noon conditions.
 - **Composite Sharpness Loss**: $\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{MSE}} + 0.5 \mathcal{L}_{\text{L1}} + 0.3 \mathcal{L}_{\text{Gradient}}$.
 

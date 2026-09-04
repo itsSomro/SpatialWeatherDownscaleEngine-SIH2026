@@ -83,7 +83,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # ---------------------------------------------------------
 app = FastAPI(
     title="Universal Spatial Weather Downscale Engine API (SIH 2026)",
-    description="Universal 14-Channel Physics-Guided Residual Attention U-Net for 1km Gram Panchayat Downscaling."
+    description="Universal 16-Channel Physics-Guided Residual Attention U-Net for 1km Gram Panchayat Downscaling."
 )
 
 app.add_middleware(
@@ -100,7 +100,7 @@ stats = None
 
 @app.on_event("startup")
 def load_model_and_stats():
-    """Loads 14-channel ResAttnUNet weights and global normalization stats."""
+    """Loads 16-channel ResAttnUNet weights and global normalization stats."""
     global model, stats
     model_path = ROOT_DIR / "downscaler.pt"
     stats_path = DATA_DIR / "norm_stats_16ch.json"
@@ -188,7 +188,7 @@ def search_location(query: str = Query(..., min_length=2, description="City, dis
 
 
 # ---------------------------------------------------------
-# 6. LIVE METEOROLOGICAL DATA INGESTION (14 Channels)
+# 6. LIVE METEOROLOGICAL DATA INGESTION (16 Channels)
 # ---------------------------------------------------------
 def fetch_live_meteorology(bbox):
     """
@@ -243,7 +243,7 @@ def fetch_live_meteorology(bbox):
 
 
 # ---------------------------------------------------------
-# 7. CORE 14-CHANNEL INFERENCE ENGINE
+# 7. CORE 16-CHANNEL INFERENCE ENGINE
 # ---------------------------------------------------------
 def run_downscale_inference(dem_raw, bbox, coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, region_name=""):
     """Constructs 16-channel normalized tensor and executes ResAttnUNet prediction."""
@@ -391,7 +391,7 @@ def get_metadata():
             "default_date": v["default_date"]
         } for k, v in REGIONS.items()},
         "channels": INPUT_CHANNELS,
-        "version": "2.0 (14-Channel Universal ResAttnUNet)"
+        "version": "2.0 (16-Channel Universal ResAttnUNet)"
     }
 
 

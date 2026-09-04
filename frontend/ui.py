@@ -116,7 +116,8 @@ def fetch_metadata():
         "channels": [
             "coarse_temp", "coarse_pressure", "elevation", "lat", "lon",
             "slope_mag", "aspect_x", "aspect_y", "curvature",
-            "wind_u", "wind_v", "wind_speed", "orographic_wind", "relative_humidity"
+            "wind_u", "wind_v", "wind_speed", "orographic_wind", "relative_humidity",
+            "ndvi", "built_up"
         ]
     }
 
@@ -129,8 +130,8 @@ metadata = fetch_metadata()
 with st.sidebar:
     st.image("https://img.icons8.com/clouds/200/sun.png", width=90)
     st.title("Universal Downscaler")
-    st.markdown("**14-Channel Physics-Guided AI Engine**")
-    st.markdown('<span class="badge-channel">14 Physical Channels</span> <span class="badge-live">Live Wind & Humidity</span>', unsafe_allow_html=True)
+    st.markdown("**16-Channel Physics-Guided AI Engine**")
+    st.markdown('<span class="badge-channel">16 Physical Channels</span> <span class="badge-live">Live Wind & Humidity</span>', unsafe_allow_html=True)
     st.markdown("---")
 
     # Mode Selector
@@ -207,7 +208,7 @@ def get_on_demand_data(name, lat, lon):
 
 
 # Trigger Downscaling Execution
-with st.spinner("Executing Universal 14-Channel Physics-Guided Downscaling..."):
+with st.spinner("Executing Universal 16-Channel Physics-Guided Downscaling..."):
     try:
         if input_source == "🔍 Drop Any Custom Region (Search)" and custom_location:
             data = get_on_demand_data(custom_location["name"], custom_location["latitude"], custom_location["longitude"])

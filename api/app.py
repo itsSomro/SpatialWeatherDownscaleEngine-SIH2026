@@ -473,6 +473,134 @@ REAL_PANCHAYATS = {
 }
 
 
+# ---------------------------------------------------------
+# DYNAMIC REAL VILLAGE LOOKUP VIA NOMINATIM REVERSE GEOCODING
+# ---------------------------------------------------------
+_VILLAGE_CACHE: Dict[str, Optional[List[dict]]] = {}
+
+def fetch_real_villages_nominatim(bbox, region_title, max_villages=8):
+    """
+    Finds real village/town names by reverse-geocoding a grid of sample
+    points across the bounding box using Nominatim (OpenStreetMap).
+    Nominatim is proven reachable from this environment (unlike Overpass).
+
+    Returns a list of GP dicts, or None on failure so the caller can
+    fall back to the synthetic geometric approach.
+    """
+    north, west, south, east = bbox
+    cache_key = f"{round(south,2)}_{round(west,2)}_{round(north,2)}_{round(east,2)}"
+    if cache_key in _VILLAGE_CACHE:
+        return _VILLAGE_CACHE[cache_key]
+
+    # Generate a grid of 12 sample points spread across the bbox
+    # (3 rows x 4 cols at 25/50/75% offsets)
+    sample_fracs = [
+        (0.25, 0.25), (0.25, 0.50), (0.25, 0.75),
+        (0.50, 0.20), (0.50, 0.50), (0.50, 0.80),
+        (0.75, 0.25), (0.75, 0.50), (0.75, 0.75),
+        (0.15, 0.50), (0.85, 0.50), (0.50, 0.40),
+    ]
+    sample_points = [
+        (south + fy * (north - south), west + fx * (east - west))
+        for fy, fx in sample_fracs
+    ]
+
+    seen_names = set()
+    raw_villages = []
+
+    import time
+    for lat_pt, lon_pt in sample_points:
+        if len(raw_villages) >= max_villages:
+            break
+        try:
+            resp = requests.get(
+                "https://nominatim.openstreetmap.org/reverse",
+                params={
+                    "lat": round(lat_pt, 5),
+                    "lon": round(lon_pt, 5),
+                    "zoom": 15,        # village/hamlet level
+                    "format": "json",
+                    "addressdetails": 1,
+                    "accept-language": "en",
+                },
+                headers={"User-Agent": "GramVayu-SIH2026/1.0 (microclimate downscaling)"},
+                timeout=5,
+            )
+            if resp.status_code != 200:
+                continue
+
+            data = resp.json()
+            address = data.get("address", {})
+
+            # Extract the most local settlement name available
+            village_name = (
+                address.get("village")
+                or address.get("town")
+                or address.get("hamlet")
+                or address.get("suburb")
+                or address.get("city_district")
+                or address.get("city")
+            )
+            if not village_name:
+                continue
+
+            # Skip if not latin-readable or already seen
+            if not any(c.isascii() and c.isalpha() for c in village_name):
+                continue
+            if village_name.lower() in seen_names:
+                continue
+            seen_names.add(village_name.lower())
+
+            # Determine taluk/block from address hierarchy
+            taluk = (
+                address.get("county")          # often maps to taluk/block in India
+                or address.get("state_district")
+                or address.get("state", "")
+            )
+
+            # Determine place type for label suffix
+            place_type = "village"
+            if address.get("town"):
+                place_type = "town"
+            elif address.get("hamlet"):
+                place_type = "hamlet"
+
+            raw_villages.append({
+                "name": village_name,
+                "lat": float(data.get("lat", lat_pt)),
+                "lon": float(data.get("lon", lon_pt)),
+                "taluk": taluk,
+                "place_type": place_type,
+            })
+
+            # Nominatim usage policy: max 1 request per second
+            time.sleep(0.3)
+
+        except Exception:
+            continue
+
+    if not raw_villages:
+        _VILLAGE_CACHE[cache_key] = None
+        return None
+
+    # Build GP list with proper suffixes
+    gp_list = []
+    for v in raw_villages:
+        suffix = "Nagar Panchayat" if v["place_type"] == "town" else "Gram Panchayat"
+        label = v["name"] if v["name"].endswith((" Panchayat", " GP", " NP")) else f"{v['name']} {suffix}"
+        gp_list.append({
+            "name": label,
+            "lat": v["lat"],
+            "lon": v["lon"],
+            "taluk": v["taluk"],
+            "crops": "Local Agriculture",
+        })
+
+    _VILLAGE_CACHE[cache_key] = gp_list
+    print(f"[Nominatim] Fetched {len(gp_list)} real villages for '{region_title}': {[g['name'] for g in gp_list]}")
+    return gp_list
+
+
 def build_panchayat_bulletins(region_key, region_title, bbox, final_t, final_rh, final_wind, final_precip, final_et0, dem_m):
     """
     Builds official IMD GKMS agro-advisory bulletins for REAL Gram Panchayats
@@ -483,6 +611,10 @@ def build_panchayat_bulletins(region_key, region_title, bbox, final_t, final_rh,
     gp_list = REAL_PANCHAYATS.get(r_key)
 
     # For on-demand/searched custom locations without hardcoded GPs:
+    if not gp_list:
+        gp_list = fetch_real_villages_nominatim(bbox, region_title)
+
+    # Last-resort synthetic geometric fallback if OSM also failed:
     if not gp_list:
         gp_list = [
             {"name": f"{region_title} - Central Gram Panchayat", "lat": (north + south) / 2.0, "lon": (west + east) / 2.0, "taluk": "Central", "crops": "Local Food Crops"},

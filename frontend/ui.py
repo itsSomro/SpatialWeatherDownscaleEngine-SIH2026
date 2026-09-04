@@ -6,7 +6,7 @@ import requests
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, zoom
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -761,9 +761,28 @@ with col_main:
             chosen_grid = np.array(data["downscaled_grid"])
             chosen_unit = "°C"
 
-        v_min_g = float(np.min(chosen_grid))
-        v_max_g = float(np.max(chosen_grid))
-        norm_g = np.clip((chosen_grid - v_min_g) / (v_max_g - v_min_g + 1e-6), 0.0, 1.0)
+        # Multi-stage smoothing and bicubic upsampling (64x64 -> 256x256)
+        # 1. Pre-smooth high-frequency sensor/residual grid noise
+        pre_smoothed = gaussian_filter(chosen_grid, sigma=1.0)
+        # 2. Bicubic upsample (order=3) for continuous, non-blocky contour rendering
+        scale_factor = 256.0 / max(chosen_grid.shape[0], chosen_grid.shape[1])
+        if scale_factor > 1.0:
+            upsampled = zoom(pre_smoothed, scale_factor, order=3)
+            render_grid = gaussian_filter(upsampled, sigma=1.5)
+        else:
+            render_grid = gaussian_filter(pre_smoothed, sigma=1.5)
+
+        # Dynamic contrast floor prevents flat plain regions (e.g. Gorakhpur)
+        # with minimal terrain variation from over-amplifying sub-degree noise into checkerboard static
+        min_spans = {"humidity": 8.0, "wind": 5.0, "precip": 2.0, "et0": 1.0}
+        min_span = min_spans.get(reg_var_key, 2.5)  # default 2.5°C for temperature
+        v_mean = float(np.mean(render_grid))
+        actual_span = float(np.max(render_grid) - np.min(render_grid))
+        effective_span = max(actual_span, min_span)
+        v_min_display = v_mean - effective_span / 2.0
+        v_max_display = v_mean + effective_span / 2.0
+
+        norm_g = np.clip((render_grid - v_min_display) / (effective_span + 1e-6), 0.0, 1.0)
         cmap_obj = plt.get_cmap(reg_cmap_choice)
         rgba_grid = cmap_obj(norm_g)
         rgba_grid[..., 3] = reg_transparency

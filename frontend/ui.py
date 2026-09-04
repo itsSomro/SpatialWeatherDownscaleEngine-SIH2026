@@ -1309,23 +1309,28 @@ if col_right_slidebar is not None:
         """, unsafe_allow_html=True)
 
         # Quick Inquiries chips
-        st.markdown("<div style='font-size: 11px; font-weight: 600; color: #94a3b8; margin: 4px 0 2px 0;'>Quick Inquiries:</div>", unsafe_allow_html=True)
+        st.markdown("<div style='font-size: 11px; font-weight: 600; color: #94a3b8; margin: 4px 0 2px 0;'>Suggested Inquiries:</div>", unsafe_allow_html=True)
         q1, q2 = st.columns(2)
         side_quick_prompt = None
         with q1:
             if st.button("❄️ Coldest GP", use_container_width=True, key="rq_cold"):
                 side_quick_prompt = "Which panchayat is the coldest, and what are the valley cold-air pooling and frost risks?"
+            if st.button("🌧️ Rain & Storm", use_container_width=True, key="rq_rain"):
+                side_quick_prompt = "Is it raining today, and what is the orographic precipitation forecast?"
+            if st.button("🌱 Sowing Advice", use_container_width=True, key="rq_sow"):
+                side_quick_prompt = "Can farmers sow seeds today, and what are the soil temperature and moisture conditions?"
             if st.button("🏛️ Circular", use_container_width=True, key="rq_circ"):
                 side_quick_prompt = "Draft an official Gram Panchayat advisory circular based on current microclimate relief."
         with q2:
-            if st.button("💧 Irrigation", use_container_width=True, key="rq_water"):
+            if st.button("💧 Irrigation (L/ha)", use_container_width=True, key="rq_water"):
                 side_quick_prompt = "Which panchayat has highest irrigation water demand (L/ha) and what is the recommended schedule?"
             if st.button("🚜 Spray Window", use_container_width=True, key="rq_spray"):
                 side_quick_prompt = "What is the precision agrochemical spraying window considering current topographic winds?"
-
-        if st.button("🧹 Clear Chat History", use_container_width=True, key="rq_clear"):
-            st.session_state.agent_messages = []
-            st.rerun()
+            if st.button("🔬 Why 1km vs 10km?", use_container_width=True, key="rq_why1km"):
+                side_quick_prompt = "Why is 1km resolution better than 10km or 30km regional models like IMD and ERA5?"
+            if st.button("🧹 Clear Chat", use_container_width=True, key="rq_clear"):
+                st.session_state.agent_messages = []
+                st.rerun()
 
         # Chat message scroll container inside right slidebar
         chat_box = st.container(height=420)
@@ -1338,7 +1343,7 @@ if col_right_slidebar is not None:
                     st.markdown(msg["content"])
 
         # Chat Input Field
-        right_user_in = st.chat_input("Ask GramVayu AI (e.g. 'pune weather', 'coffee spray window')...", key="right_side_chat_in")
+        right_user_in = st.chat_input("Ask GramVayu AI (e.g. 'will it rain?', 'why 1km?', 'coffee spray window')...", key="right_side_chat_in")
         active_prompt = side_quick_prompt or right_user_in
 
         if active_prompt:

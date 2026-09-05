@@ -1,4 +1,4 @@
-# Spatial Weather Downscale Engine (GramVayu) — SIH 2026
+# Spatial Weather Downscale Engine (GramAtmo) — SIH 2026
 ### Universal 16-Channel Physics-Guided Deep Learning Architecture for 1 km × 1 km Gram Panchayat Microclimate Downscaling & Agro-Advisories
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
@@ -21,7 +21,7 @@ Issuing uniform district-level weather forecasts causes severe operational break
 * **Delayed Agricultural Spray Decisions**: High-velocity ridge winds drift pesticides onto adjacent crops, while valley calm leads to fungal spore germination.
 * **Unprepared Livestock Operations**: Localized heat-humidity stress indexes (THI) exceed safety thresholds hours before district bulletins issue warnings.
 
-**The Solution:** The **Spatial Weather Downscale Engine (GramVayu)** bridges the "last-mile microclimate gap". It takes standard, coarse $\sim 30\text{ km}$ atmospheric feeds and transforms them into sharp, **$1\text{ km} \times 1\text{ km}$ Gram Panchayat-level microclimate predictions** in **$< 1\text{ second}$**, seamlessly translating thermal and moisture gradients into **IMD GKMS-aligned agro-advisories**.
+**The Solution:** The **Spatial Weather Downscale Engine (GramAtmo)** bridges the "last-mile microclimate gap". It takes standard, coarse $\sim 30\text{ km}$ atmospheric feeds and transforms them into sharp, **$1\text{ km} \times 1\text{ km}$ Gram Panchayat-level microclimate predictions** in **$< 1\text{ second}$**, seamlessly translating thermal and moisture gradients into **IMD GKMS-aligned agro-advisories**.
 
 ---
 
@@ -87,7 +87,7 @@ Unlike naive mathematical interpolation methods (bilinear, bicubic, or kriging) 
 ---
 
 ### 2. Physics-Informed Residual Learning Formulation
-Directly predicting raw absolute temperatures with deep neural networks causes severe distribution shift and catastrophic generalization failures when tested on unseen mountain ranges. GramVayu reformulates downscaling as a **physics-informed residual decomposition**:
+Directly predicting raw absolute temperatures with deep neural networks causes severe distribution shift and catastrophic generalization failures when tested on unseen mountain ranges. GramAtmo reformulates downscaling as a **physics-informed residual decomposition**:
 
 $$\hat{T}_{1km} = \underbrace{\left[ T_{coarse} - \Gamma_{eff} \cdot \Delta z \right]}_{\text{Physics Baseline (Adiabatic Lapse Rate)}} + \underbrace{\mathcal{F}_{\theta}(X_{16})}_{\text{Learned Microclimate Residual Anomaly}}$$
 
@@ -108,7 +108,7 @@ Where:
 ---
 
 ### 4. Real Settlement Discovery & Phonetic Transliteration Engine
-Real-world Indian administrative queries suffer from alternate spellings, dialect transliterations, and broad bounding box mismatches. GramVayu implements a dedicated settlement engine:
+Real-world Indian administrative queries suffer from alternate spellings, dialect transliterations, and broad bounding box mismatches. GramAtmo implements a dedicated settlement engine:
 * **Strict 30 km × 30 km Spatial Bounding**: Discovered villages are strictly clamped to a 15 km radius from the active region center, eliminating false-positive villages from adjacent districts.
 * **Dual-Tier Geocoding**: Direct OpenStreetMap / Nominatim reverse-geocoding query matrix with automatic fallback to Open-Meteo geocoding.
 * **Phonetic Transliteration Variant Resolver (`generate_transliteration_variants`)**: Automatically expands Indian place names across common phonetic alternates (e.g. *Kadhakwasla* $\leftrightarrow$ *Khadakwasla*, *v* $\leftrightarrow$ *w*, *sh* $\leftrightarrow$ *s*, *ee* $\leftrightarrow$ *i*).
@@ -146,7 +146,7 @@ Downscaled meteorological pixels are automatically mapped to operational agricul
 
 To guarantee scientific validity, the engine was benchmarked against **physical thermometer and weather sensor observations** downloaded directly from the official **NOAA Integrated Surface Database (ISD)** across diverse Indian elevation profiles spanning from **$31\text{ m}$ (coastal plain) to $2,202\text{ m}$ (Himalayan peak)**:
 
-| Weather Station | Region & Terrain Type | Station Elevation | Coarse NWP MAE | Standard Lapse Rate MAE | **GramVayu ResAttnUNet MAE** | Model Correlation ($r$) |
+| Weather Station | Region & Terrain Type | Station Elevation | Coarse NWP MAE | Standard Lapse Rate MAE | **GramAtmo ResAttnUNet MAE** | Model Correlation ($r$) |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
 | **Shimla Station** (420830) | Western Himalayas (High Alpine Ridge) | $2,202\text{ m}$ | $1.10^\circ\text{C}$ | $2.74^\circ\text{C}$ | **$1.31^\circ\text{C}$** | **$0.91$** |
 | **Kullu-Manali** (427051) | Western Himalayas (Deep Mountain Valley) | $1,089\text{ m}$ | $2.74^\circ\text{C}$ | $2.51^\circ\text{C}$ | **$2.77^\circ\text{C}$** | **$0.94$** |
@@ -156,7 +156,7 @@ To guarantee scientific validity, the engine was benchmarked against **physical 
 | **Mangalore Station** (432850) | Coastal Western Ghats (Maritime Lowland) | $31\text{ m}$ | $1.57^\circ\text{C}$ | $1.56^\circ\text{C}$ | **$1.16^\circ\text{C}$** | **$0.34$** |
 | **SUB-CONTINENT AVERAGE** | **All Physiographic Elevation Regimes** | **$31\text{ m} - 2,202\text{ m}$** | **$2.15^\circ\text{C}$** | **$2.33^\circ\text{C}$** | **$1.94^\circ\text{C}$** | **$0.83$** |
 
-> **Key Takeaway**: Across extreme terrain transitions, GramVayu achieves an average Mean Absolute Error (MAE) of **$1.94^\circ\text{C}$** against physical ground sensors, reducing thermal prediction error while maintaining an average Pearson correlation coefficient of **$r = 0.83$**.
+> **Key Takeaway**: Across extreme terrain transitions, GramAtmo achieves an average Mean Absolute Error (MAE) of **$1.94^\circ\text{C}$** against physical ground sensors, reducing thermal prediction error while maintaining an average Pearson correlation coefficient of **$r = 0.83$**.
 
 ---
 

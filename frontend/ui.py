@@ -1365,7 +1365,7 @@ with col_main:
         <div class="masthead-frame">
           <div class="masthead-tag">SYS.ID // IMD-GKMS METEOROLOGICAL DISPATCH // 1 KM² PRECISION GRID</div>
           <div class="masthead-name">
-            GRAMATMO <span class="masthead-vernacular">(ग्रामवायु)</span>
+            GRAMATMO <span class="masthead-vernacular"></span>
           </div>
           <div class="masthead-desc">
             Universal physics-guided atmospheric downscale architecture. Generates 1km² contiguous prognostic fields across complex topographic relief.

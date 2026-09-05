@@ -144,6 +144,34 @@ class OnDemandRequest(BaseModel):
     time_slot: str = Field(default="12:00", description="Time slot e.g. '12:00'")
 
 
+class PlotAdvisoryRequest(BaseModel):
+    latitude: float = Field(..., description="Exact GPS latitude of the farm plot")
+    longitude: float = Field(..., description="Exact GPS longitude of the farm plot")
+    plot_name: Optional[str] = Field(default="My Farm Plot", description="Farmer's custom plot identifier")
+    plot_size_acres: Optional[float] = Field(default=1.0, gt=0, description="Plot area in acres")
+    crop_type: Optional[str] = Field(default="General Agriculture", description="Target crop for Kc coefficient")
+    mode: str = Field(default="live", description="'live' or 'archive'")
+    date: str = Field(default="2023-05-15", description="Historical date YYYY-MM-DD")
+    time_slot: str = Field(default="12:00", description="Time slot e.g. '12:00'")
+
+
+# FAO-56 Crop Coefficients (Kc) for Indian agriculture
+CROP_KC_FACTORS = {
+    "Coffee / Pepper": 0.95,
+    "Tea": 0.95,
+    "Paddy (Rice)": 1.15,
+    "Wheat": 1.05,
+    "Tomato / Vegetables": 1.10,
+    "Potato": 1.10,
+    "Sugarcane": 1.25,
+    "Cotton": 1.15,
+    "Maize / Corn": 1.10,
+    "Mustard": 1.00,
+    "Apple / Temperate Orchard": 0.90,
+    "General Agriculture": 1.00
+}
+
+
 class AgentChatRequest(BaseModel):
     query: str = Field(..., description="User question or instruction for the AI agent")
     thread_id: Optional[str] = Field(default="default", description="Conversation thread session id")
@@ -894,6 +922,144 @@ def on_demand_downscale(req: OnDemandRequest):
                 "mean_precip_mm": round(float(np.mean(final_precip)), 2),
                 "mean_et0_mm": round(float(np.mean(final_et0)), 2)
             },
+            "panchayats": panchayats,
+            "downscaled_grid": final_t[::2, ::2].tolist(),
+            "humidity_grid": final_rh[::2, ::2].tolist(),
+            "wind_grid": final_wind[::2, ::2].tolist(),
+            "precip_grid": final_precip[::2, ::2].tolist(),
+            "et0_grid": final_et0[::2, ::2].tolist(),
+            "coarse_grid": coarse_t[::2, ::2].tolist(),
+            "elevation_grid": dem_m[::2, ::2].tolist()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/plot-advisory")
+def generate_plot_advisory(req: PlotAdvisoryRequest):
+    """
+    Downscales weather centered directly on a farmer's plot coordinates
+    and extracts the pinpoint 1km microclimate metrics and irrigation water balance.
+    """
+    try:
+        clean_id = "".join(c if c.isalnum() else "_" for c in req.plot_name.lower().strip())
+        
+        # 1. Download or slice DEM centered on (latitude, longitude)
+        _, dem_1km, meta = download_on_demand_region(req.latitude, req.longitude, req.plot_name, box_size_deg=0.9, fetch_era5=False)
+        bbox = meta["bbox"]
+        north, west, south, east = bbox
+
+        # 2. Ingest synoptic atmospheric feed
+        if req.mode == "live":
+            coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, weather_meta = fetch_live_meteorology(bbox)
+        else:
+            coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, weather_meta = fetch_archive_meteorology(bbox, req.date, req.time_slot)
+
+        # 3. Execute 16-Channel ResAttnUNet Downscaling
+        out = run_downscale_inference(dem_1km, bbox, coarse_t, coarse_p, coarse_rh, coarse_u, coarse_v, coarse_spd, region_name=req.plot_name)
+
+        final_t = out["final_temp"]
+        final_rh = out["final_humidity"]
+        final_wind = out["final_wind"]
+        final_precip = out["final_precip"]
+        final_et0 = out["final_et0"]
+        dem_m = out["elevation"]
+
+        # 4. Map the farmer's exact (lat, lon) to grid index (row, col)
+        H, W = final_t.shape
+        row = int(np.clip(((north - req.latitude) / max(1e-5, (north - south))) * (H - 1), 0, H - 1))
+        col = int(np.clip(((req.longitude - west) / max(1e-5, (east - west))) * (W - 1), 0, W - 1))
+
+        # 5. Extract pinpoint pixel values
+        plot_temp = float(final_t[row, col])
+        plot_rh = float(final_rh[row, col])
+        plot_wind = float(final_wind[row, col])
+        plot_precip = float(final_precip[row, col])
+        plot_et0 = float(final_et0[row, col])
+        plot_elev = int(dem_m[row, col])
+        coarse_temp = float(coarse_t[row, col])
+
+        # 6. Calculate irrigation in Liters (1 mm over 1 acre = 4,046.86 Liters)
+        kc = CROP_KC_FACTORS.get(req.crop_type, 1.0)
+        daily_et_crop_mm = round(float(plot_et0 * kc), 2)
+        liters_per_acre = int(daily_et_crop_mm * 4046.86)
+        total_liters_needed = int(liters_per_acre * req.plot_size_acres)
+
+        # 7. Generate IMD GKMS agro-bulletin for this plot
+        plot_bulletin = generate_panchayat_advisory_bulletin(
+            panchayat_name=f"📍 {req.plot_name} (Farm Plot)",
+            t_mean=plot_temp,
+            t_min=plot_temp - 4.5,
+            t_max=plot_temp + 5.0,
+            rh_pct=plot_rh,
+            wind_kmh=plot_wind,
+            precip_mm=plot_precip,
+            elevation_m=plot_elev
+        )
+        thermal_offset = round(plot_temp - coarse_temp, 2)
+
+        plot_bulletin["taluk"] = f"{req.crop_type} ({req.plot_size_acres} Acres)"
+        plot_bulletin["major_crops"] = req.crop_type
+        plot_bulletin["coordinates"] = [req.latitude, req.longitude]
+        plot_bulletin["is_farmer_plot"] = True
+        plot_bulletin["plot_size_acres"] = req.plot_size_acres
+        plot_bulletin["kc_factor"] = kc
+        plot_bulletin["weather_summary"]["plot_water_demand_liters"] = total_liters_needed
+        plot_bulletin["weather_summary"]["water_demand_liters_acre"] = liters_per_acre
+        plot_bulletin["weather_summary"]["crop_evapotranspiration_mm"] = daily_et_crop_mm
+        plot_bulletin["weather_summary"]["microclimate_offset_c"] = thermal_offset
+        plot_bulletin["primary_action"] = (
+            plot_bulletin["advisories"]["frost"]["action"] if ("Warning" in plot_bulletin["advisories"]["frost"]["badge"] or "Danger" in plot_bulletin["advisories"]["frost"]["badge"])
+            else (plot_bulletin["advisories"]["blight"]["action"] if "Alert" in plot_bulletin["advisories"]["blight"]["badge"]
+            else f"Irrigation demand for your {req.plot_size_acres} acre {req.crop_type} is {total_liters_needed:,} Liters today ({liters_per_acre:,} L/acre). Spray window: {plot_bulletin['advisories']['spray_window']['status'].upper()}.")
+        )
+
+        surrounding = build_panchayat_bulletins(clean_id, req.plot_name, bbox, final_t, final_rh, final_wind, final_precip, final_et0, dem_m)
+        panchayats = [plot_bulletin] + [p for p in surrounding if p["panchayat_name"] != plot_bulletin["panchayat_name"]]
+
+        return {
+            "status": "success",
+            "region_id": clean_id,
+            "region_name": f"{req.plot_name} (Farmer Plot)",
+            "center": [req.latitude, req.longitude],
+            "bbox": bbox,
+            "live_meta": weather_meta,
+            "metrics": {
+                "min_temp": round(float(final_t.min()), 2),
+                "max_temp": round(float(final_t.max()), 2),
+                "mean_temp": round(float(np.mean(final_t)), 2),
+                "elevation_range_m": [round(float(dem_m.min()), 0), round(float(dem_m.max()), 0)],
+                "thermal_delta_c": round(float(final_t.max() - final_t.min()), 2),
+                "mean_humidity": round(float(np.mean(final_rh)), 1),
+                "mean_wind_speed": round(float(np.mean(final_wind)), 1),
+                "mean_precip_mm": round(float(np.mean(final_precip)), 2),
+                "mean_et0_mm": round(float(np.mean(final_et0)), 2)
+            },
+            "plot_profile": {
+                "name": req.plot_name,
+                "coordinates": [req.latitude, req.longitude],
+                "elevation_m": plot_elev,
+                "crop_type": req.crop_type,
+                "plot_size_acres": req.plot_size_acres,
+                "kc_factor": kc
+            },
+            "pinpoint_weather": {
+                "temp_mean_c": round(plot_temp, 1),
+                "temp_min_c": round(plot_temp - 4.5, 1),
+                "temp_max_c": round(plot_temp + 5.0, 1),
+                "relative_humidity_pct": round(plot_rh, 1),
+                "wind_speed_kmh": round(plot_wind, 1),
+                "precipitation_mm": round(plot_precip, 2),
+                "et0_reference_mm": round(plot_et0, 2),
+                "coarse_district_temp_c": round(coarse_temp, 1),
+                "microclimate_offset_c": thermal_offset
+            },
+            "irrigation_prescription": {
+                "crop_evapotranspiration_mm": daily_et_crop_mm,
+                "water_need_liters_per_acre": liters_per_acre,
+                "total_plot_water_liters": total_liters_needed
+            },
+            "agro_advisories": plot_bulletin,
             "panchayats": panchayats,
             "downscaled_grid": final_t[::2, ::2].tolist(),
             "humidity_grid": final_rh[::2, ::2].tolist(),

@@ -186,7 +186,21 @@ Downscales **any coordinate or district in India on demand**. Slices the master 
 }
 ```
 
-### 3. `GET /api/v1/search-panchayat`
+### 3. `POST /api/v1/plot-advisory`
+Field-level microclimate downscaling for **exact GPS farm plot coordinates**. Calculates sub-grid elevation, localized thermal anomaly, FAO-56 crop evapotranspiration ($ET_c = ET_0 \times K_c$), and exact irrigation demand in total liters for the plot's acreage.
+```json
+{
+  "latitude": 12.4215,
+  "longitude": 75.7382,
+  "plot_name": "Coorg Organic Coffee Estate",
+  "plot_size_acres": 3.0,
+  "crop_type": "Coffee / Pepper",
+  "mode": "live"
+}
+```
+* **Returns**: Pinpoint temperature/humidity/wind, elevation ($m$), thermal offset vs district forecast, exact total irrigation requirement (Liters), and IMD GKMS advisory directives.
+
+### 4. `GET /api/v1/search-panchayat`
 Searches for Gram Panchayats or villages strictly within a $30\text{ km} \times 30\text{ km}$ area with phonetic/transliteration resilience.
 * **Query Parameters**:
   * `query`: Village or Panchayat name (e.g., `kadhakwasla`, `kullu`, `somwarpet`)

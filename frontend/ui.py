@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from scipy.ndimage import gaussian_filter, zoom
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -658,11 +659,27 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
+    # Check for incoming GPS parameters from browser geolocation
+    q_params = st.query_params
+    if "plot_lat" in q_params and "plot_lon" in q_params:
+        try:
+            g_lat = float(q_params.get("plot_lat"))
+            g_lon = float(q_params.get("plot_lon"))
+            st.session_state["farmer_detected_lat"] = round(g_lat, 4)
+            st.session_state["farmer_detected_lon"] = round(g_lon, 4)
+            st.session_state["farmer_detected_source"] = "Device Satellite GPS Sensor"
+            st.session_state["domain_selection_mode"] = "📍 Farmer Plot Coordinates"
+            st.query_params.clear()
+        except Exception:
+            pass
+
+    default_mode_idx = 2 if st.session_state.get("domain_selection_mode") == "📍 Farmer Plot Coordinates" else 0
+
     input_source = st.radio(
         "Domain Selection",
-        ["Preset Calibrated Domains", "Custom Domain Search (All-India)"],
-        index=0,
-        help="Select a calibrated anchor domain or query any coordinates/town in India."
+        ["Preset Calibrated Domains", "Custom Domain Search (All-India)", "📍 Farmer Plot Coordinates"],
+        index=default_mode_idx,
+        help="Select a calibrated anchor domain, query any town in India, or enter your exact farm GPS coordinates."
     )
 
     mode_val = "live"
@@ -727,7 +744,205 @@ with st.sidebar:
                 "lat": p_c[0],
                 "lon": p_c[1],
                 "is_preset": True,
+                "is_plot": False,
                 "preset_key": selected_region_key
+            }
+            st.session_state.selected_gp_idx = 0
+            st.session_state.pop("sb_gp_idx", None)
+
+    elif "Plot" in input_source:
+        st.markdown("""
+        <div style="font-family: var(--mono); font-size: 10px; color: var(--accent); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px;">
+            GPS FIELD SPECIFICATION // LAST-MILE
+        </div>
+        <div style="font-family: var(--sans); font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
+            Enter decimal coordinates of your plot or auto-detect via device GPS sensor.
+        </div>
+        """, unsafe_allow_html=True)
+
+        farm_presets = {
+            "Custom GPS Input": None,
+            "🌿 Coorg Coffee Estate (Karnataka)": (12.4215, 75.7382, "Coorg Coffee Estate", 3.0, "Coffee / Pepper"),
+            "🍎 Kullu Apple Orchard (Himachal)": (31.9540, 77.1080, "Beas Valley Apple Orchard", 2.5, "Apple / Temperate Orchard"),
+            "🍅 Kolar Polyhouse Tomato (Karnataka)": (13.1360, 78.1290, "Kolar Polyhouse Tomato", 1.5, "Tomato / Vegetables"),
+            "🍃 Darjeeling High-Altitude Tea (WB)": (27.0410, 88.2660, "Happy Valley Tea Estate", 5.0, "Tea"),
+            "🌾 Khadakwasla Basin Farm (Maharashtra)": (18.4350, 73.7650, "Khadakwasla Basin Farm", 2.0, "General Agriculture")
+        }
+
+        selected_farm_preset = st.selectbox(
+            "Farm Preset (or choose Custom GPS):",
+            list(farm_presets.keys()),
+            index=0
+        )
+
+        # Check if auto-detected GPS coordinates exist
+        detected_lat = st.session_state.get("farmer_detected_lat")
+        detected_lon = st.session_state.get("farmer_detected_lon")
+        detected_source = st.session_state.get("farmer_detected_source")
+
+        if detected_lat is not None and detected_lon is not None and selected_farm_preset == "Custom GPS Input":
+            def_lat = detected_lat
+            def_lon = detected_lon
+            def_name = f"My Plot ({detected_source.split(' ')[0]})"
+            def_size, def_crop = 2.0, "Coffee / Pepper"
+        elif farm_presets[selected_farm_preset] is not None:
+            def_lat, def_lon, def_name, def_size, def_crop = farm_presets[selected_farm_preset]
+        else:
+            def_lat, def_lon, def_name, def_size, def_crop = 12.4215, 75.7382, "My Agricultural Plot", 2.5, "Coffee / Pepper"
+
+        # Actionable Auto-Detect Controls
+        st.markdown(f"""
+        <div style="font-family: var(--mono); font-size: 9.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin: 8px 0 4px 0;">
+            ONE-CLICK GPS AUTO-DETECTION:
+        </div>
+        """, unsafe_allow_html=True)
+
+        auto_c1, auto_c2 = st.columns([1.5, 1.5], gap="small")
+        with auto_c1:
+            components.html("""
+            <style>
+              body { margin: 0; padding: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+              .gps-btn {
+                width: 100%;
+                background: #ff4a1c;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 7px 10px;
+                font-family: monospace, sans-serif;
+                font-size: 10.5px;
+                font-weight: 700;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 5px;
+                box-sizing: border-box;
+                height: 38px;
+              }
+              .gps-btn:hover { background: #e03e14; }
+              .gps-btn:disabled { opacity: 0.6; cursor: wait; }
+              .gps-status {
+                font-family: monospace;
+                font-size: 9.5px;
+                color: #8c96a5;
+                margin-top: 4px;
+                text-align: center;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+              }
+            </style>
+            <button id="btn-gps" class="gps-btn" onclick="fetchGPS()">
+              <span>📡</span> DEVICE GPS SENSOR
+            </button>
+            <div id="gps-status" class="gps-status"></div>
+            <script>
+            function fetchGPS() {
+              const btn = document.getElementById("btn-gps");
+              const stat = document.getElementById("gps-status");
+              if (!navigator.geolocation) {
+                stat.innerText = "GPS not supported on browser";
+                return;
+              }
+              btn.disabled = true;
+              btn.innerHTML = "<span>📡</span> LOCKING SATELLITE...";
+              stat.innerText = "Querying device GPS sensor...";
+              navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                  const lat = pos.coords.latitude.toFixed(4);
+                  const lon = pos.coords.longitude.toFixed(4);
+                  stat.innerHTML = `<span style="color: #10b981;">✓ SATELLITE LOCKED</span>`;
+                  btn.innerHTML = "<span>✓</span> GPS LOCATED";
+                  const pUrl = new URL(window.parent.location.href);
+                  pUrl.searchParams.set("plot_lat", lat);
+                  pUrl.searchParams.set("plot_lon", lon);
+                  window.parent.location.href = pUrl.href;
+                },
+                (err) => {
+                  stat.innerHTML = `<span style="color: #ef4444;">Access denied (${err.message})</span>`;
+                  btn.disabled = false;
+                  btn.innerHTML = "<span>📡</span> RETRY GPS SENSOR";
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+              );
+            }
+            </script>
+            """, height=60)
+        with auto_c2:
+            if st.button("🌐 AUTO-LOCATE VIA IP", key="btn_auto_detect_ip", use_container_width=True, help="Instantly detects approximate coordinates using your internet network connection"):
+                try:
+                    ip_resp = requests.get("http://ip-api.com/json/", timeout=4).json()
+                    if ip_resp.get("status") == "success":
+                        st.session_state["farmer_detected_lat"] = round(float(ip_resp["lat"]), 4)
+                        st.session_state["farmer_detected_lon"] = round(float(ip_resp["lon"]), 4)
+                        st.session_state["farmer_detected_source"] = f"{ip_resp.get('city', 'Local')}, {ip_resp.get('regionName', 'IN')} (Network/IP)"
+                        st.toast(f"Located: {ip_resp.get('city')} ({ip_resp['lat']:.2f}°N, {ip_resp['lon']:.2f}°E)", icon="📍")
+                        st.rerun()
+                    else:
+                        st.warning("Could not resolve network location. Please enter coordinates manually.")
+                except Exception as e:
+                    st.warning(f"Network location error: {e}")
+
+        if detected_source and selected_farm_preset == "Custom GPS Input":
+            st.markdown(f"""
+            <div style="font-family: var(--mono); font-size: 10.5px; color: #10b981; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 4px; padding: 6px 12px; margin: 4px 0 10px 0; display: flex; justify-content: space-between; align-items: center;">
+              <span>✓ AUTO-LOCATED: <b>{def_lat:.4f}°N, {def_lon:.4f}°E</b> ({detected_source})</span>
+              <span style="font-size: 9px; color: #8c96a5;">READY FOR DOWNSCALE</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        c_p1, c_p2 = st.columns(2)
+        with c_p1:
+            plot_lat = st.number_input("Latitude (°N):", value=float(def_lat), min_value=6.0, max_value=38.0, step=0.0005, format="%.4f")
+        with c_p2:
+            plot_lon = st.number_input("Longitude (°E):", value=float(def_lon), min_value=68.0, max_value=98.0, step=0.0005, format="%.4f")
+
+        c_pn, c_ps = st.columns([3, 2])
+        with c_pn:
+            plot_name = st.text_input("Plot / Orchard Name:", value=def_name)
+        with c_ps:
+            plot_acres = st.number_input("Plot Area (Acres):", value=float(def_size), min_value=0.1, max_value=500.0, step=0.5)
+
+        crop_list = [
+            "Coffee / Pepper", "Tea", "Paddy (Rice)", "Wheat",
+            "Tomato / Vegetables", "Potato", "Sugarcane",
+            "Cotton", "Maize / Corn", "Mustard",
+            "Apple / Temperate Orchard", "General Agriculture"
+        ]
+        plot_crop = st.selectbox(
+            "Cultivated Crop (for FAO-56 Transpiration Factor):",
+            crop_list,
+            index=crop_list.index(def_crop) if def_crop in crop_list else 0
+        )
+
+        op_mode_custom = st.radio("Weather Feed", ["Live Current Forecast", "Seasonal Archive (ERA5)"], index=0, key="plot_feed_mode")
+        mode_val = "live" if "Live" in op_mode_custom else "archive"
+        if mode_val == "archive":
+            st.markdown("##### 📅 Historical Archive Date")
+            import datetime
+            picked_d = st.date_input(
+                "Select Historical Date",
+                value=datetime.date(2023, 5, 15),
+                min_value=datetime.date(2015, 1, 1),
+                max_value=datetime.date(2024, 12, 31),
+                key="plot_archive_calendar"
+            )
+            archive_date = picked_d.strftime("%Y-%m-%d")
+        else:
+            archive_date = "2023-05-15"
+
+        current_plot_sig = f"{plot_name}_{plot_lat}_{plot_lon}_{plot_acres}_{plot_crop}"
+        if st.session_state.active_region_info.get("plot_signature") != current_plot_sig:
+            st.session_state.active_region_info = {
+                "name": plot_name,
+                "lat": round(plot_lat, 4),
+                "lon": round(plot_lon, 4),
+                "is_preset": False,
+                "is_plot": True,
+                "plot_size_acres": float(plot_acres),
+                "crop_type": plot_crop,
+                "plot_signature": current_plot_sig
             }
             st.session_state.selected_gp_idx = 0
             st.session_state.pop("sb_gp_idx", None)
@@ -753,7 +968,8 @@ with st.sidebar:
                         "name": f"{custom_location['name']}, {custom_location['admin1']}",
                         "lat": round(custom_location["latitude"], 4),
                         "lon": round(custom_location["longitude"], 4),
-                        "is_preset": False
+                        "is_preset": False,
+                        "is_plot": False
                     }
                     st.session_state.selected_gp_idx = 0
                     st.session_state.pop("sb_gp_idx", None)
@@ -803,6 +1019,25 @@ def get_on_demand_data(name, lat, lon, mode="live", date="2023-05-15"):
         raise RuntimeError(f"On-demand acquisition failed: {resp.text}")
     return resp.json()
 
+@st.cache_data(ttl=300)
+def get_plot_advisory_data(name, lat, lon, plot_size_acres=1.0, crop_type="General Agriculture", mode="live", date="2023-05-15"):
+    resp = requests.post(
+        f"{API_URL}/api/v1/plot-advisory",
+        json={
+            "plot_name": name,
+            "latitude": lat,
+            "longitude": lon,
+            "plot_size_acres": plot_size_acres,
+            "crop_type": crop_type,
+            "mode": mode,
+            "date": date
+        },
+        timeout=45
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"Plot advisory acquisition failed: {resp.text}")
+    return resp.json()
+
 @st.cache_data(ttl=600)
 def fetch_ground_station_benchmark():
     try:
@@ -818,6 +1053,18 @@ with st.spinner("Executing Universal 16-Channel Physics-Guided Downscaling..."):
             data = get_downscaled_data(active_target.get("preset_key", "kodagu"), mode_val, archive_date)
             is_custom = False
             selected_region_key = active_target.get("preset_key", "kodagu")
+        elif active_target.get("is_plot", False):
+            data = get_plot_advisory_data(
+                active_target["name"],
+                active_target["lat"],
+                active_target["lon"],
+                active_target.get("plot_size_acres", 1.0),
+                active_target.get("crop_type", "General Agriculture"),
+                mode_val,
+                archive_date
+            )
+            is_custom = True
+            selected_region_key = active_target["name"]
         else:
             data = get_on_demand_data(active_target["name"], active_target["lat"], active_target["lon"], mode_val, archive_date)
             is_custom = True
@@ -1151,6 +1398,67 @@ with col_main:
             st.rerun()
 
     # 2. ACTIVE STATION DOSSIER
+    if active_target.get("is_plot", False):
+        plot_acres = active_target.get("plot_size_acres", 1.0)
+        plot_crop = active_target.get("crop_type", "General Agriculture")
+        plot_water_l = w_s.get("plot_water_demand_liters", int(p_et0 * 4046.86 * plot_acres))
+        water_per_acre = w_s.get("water_demand_liters_acre", int(p_et0 * 4046.86))
+        micro_offset = w_s.get("microclimate_offset_c", 0.0)
+
+        import urllib.parse
+        wa_text = (
+            f"🌾 *GramVayu Plot Advisory - {active_target.get('name', 'My Farm')}*\n"
+            f"📍 GPS: {active_lat:.4f}°N, {active_lon:.4f}°E ({curr_p.get('elevation_m', 500)}m MSL)\n"
+            f"🌱 Crop: {plot_crop} ({plot_acres} Acres)\n"
+            f"🌡️ Temperature: {w_s.get('temp_mean_c', 20.0):.1f}°C (Min: {w_s.get('temp_min_c', 15.0):.1f}°C, Max: {w_s.get('temp_max_c', 25.0):.1f}°C)\n"
+            f"💧 Humidity: {w_s.get('relative_humidity_pct', 65)}% | Dew Point: {w_s.get('dew_point_c', 15.0):.1f}°C\n"
+            f"🌬️ Wind: {w_s.get('wind_speed_kmh', 8.0):.1f} km/h\n"
+            f"🚿 *Water Requirement Today:* {plot_water_l:,} Liters ({water_per_acre:,} L/acre)\n"
+            f"🚨 *Direct Action:* {curr_p.get('primary_action', '')[:100]}"
+        )
+        wa_encoded = urllib.parse.quote(wa_text)
+
+        render_html(f"""
+        <div style="background: rgba(255, 74, 28, 0.08); border: 1px solid var(--accent); border-radius: 4px; padding: 16px 20px; margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--accent); font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;">
+                📍 VERIFIED FARM PLOT // PINPOINT GPS METEOROLOGY
+              </div>
+              <div style="font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 800; color: #f2efe9; margin-top: 2px;">
+                {active_target.get('name', 'Farm Plot')} <span style="font-size: 14px; font-weight: 400; color: #8c96a5;">({plot_acres} Acres · {plot_crop})</span>
+              </div>
+              <div style="display: flex; gap: 18px; flex-wrap: wrap; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: #8c96a5; margin-top: 6px;">
+                <span>COORDS: <b style="color: #f2efe9;">{active_lat:.4f}°N, {active_lon:.4f}°E</b></span>
+                <span>ELEVATION: <b style="color: #f2efe9;">{curr_p.get('elevation_m', 500)}m MSL</b></span>
+                <span>THERMAL LAPSE OFFSET: <b style="color: {'#10b981' if micro_offset <= 0 else '#f59e0b'};">{micro_offset:+0.1f}°C</b></span>
+              </div>
+            </div>
+            <div style="text-align: right;">
+              <a href="https://api.whatsapp.com/send?text={wa_encoded}" target="_blank" style="text-decoration: none;">
+                <button style="background: #25D366; color: #000; border: none; border-radius: 4px; padding: 8px 16px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+                  <span>📱</span> SHARE DISPATCH TO WHATSAPP
+                </button>
+              </a>
+            </div>
+          </div>
+          <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255, 74, 28, 0.2); display: flex; gap: 24px; flex-wrap: wrap;">
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--accent); text-transform: uppercase;">TODAY'S IRRIGATION VOLUME</div>
+              <div style="font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; color: #ff4a1c;">{plot_water_l:,} Liters</div>
+            </div>
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: #8c96a5; text-transform: uppercase;">APPLICATION RATE</div>
+              <div style="font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; color: #f2efe9;">{water_per_acre:,} L/acre</div>
+            </div>
+            <div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: #8c96a5; text-transform: uppercase;">FAO-56 ETc CROP TRANSPIRATION</div>
+              <div style="font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; color: #f2efe9;">{w_s.get('crop_evapotranspiration_mm', p_et0):.2f} mm/day</div>
+            </div>
+          </div>
+        </div>
+        """)
+
     st.markdown(f"""
     <div class="station-dossier" style="border-left: 3px solid var(--accent-amber);">
       <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px;">
@@ -1478,13 +1786,20 @@ with col_main:
                 is_active_gp = (idx == valid_idx)
 
                 if is_active_gp:
+                    is_farmer = p.get("is_farmer_plot", False) or (active_target.get("is_plot", False) and idx == 0)
+                    m_color = "green" if is_farmer else "red"
+                    m_icon = "leaf" if is_farmer else "star"
+                    tt_text = f"🌱 YOUR FARM PLOT: {p['panchayat_name']} ({p_t:.1f}°C, {p.get('elevation_m')}m)" if is_farmer else f"⭐ SELECTED: 🏛️ {p['panchayat_name']} ({p_t:.1f}°C, {p.get('elevation_m')}m)"
+                    head_color = "#16a34a" if is_farmer else "#0284c7"
+                    head_badge = "🌱 YOUR FARM PLOT" if is_farmer else f"⭐ {p['panchayat_name']} (Active Focus)"
+
                     folium.Marker(
                         location=[coords[0], coords[1]],
-                        icon=folium.Icon(color="red", icon="star", prefix="fa"),
-                        tooltip=f"⭐ SELECTED: 🏛️ {p['panchayat_name']} ({p_t:.1f}°C, {p.get('elevation_m')}m)",
+                        icon=folium.Icon(color=m_color, icon=m_icon, prefix="fa"),
+                        tooltip=tt_text,
                         popup=folium.Popup(f"""
                         <div style="font-family: sans-serif; min-width: 200px; color: #1e293b;">
-                          <b style="font-size: 14px; color: #0284c7;">⭐ {p['panchayat_name']} (Active Focus)</b><br/>
+                          <b style="font-size: 14px; color: {head_color};">{head_badge}</b><br/>
                           <span style="color: #64748b;">Taluk: {p.get('taluk', 'Block')} | Elev: {p.get('elevation_m')}m</span><hr style="margin: 4px 0;"/>
                           <b>🌡️ Downscaled Temp:</b> {p_t:.1f}°C<br/>
                           <b>💧 Humidity:</b> {p_rh}%<br/>
